@@ -1,0 +1,48 @@
+---
+description: Use graphify knowledge graph for codebase exploration when graphify-out exists
+alwaysApply: true
+---
+
+# Graphify (local knowledge graph)
+
+This repo may contain a pre-built graph at `graphify-out/graph.json` (gitignored).
+Use it before broad repo search when answering questions about architecture,
+dependencies, data flow, or "how does X work".
+
+## When to use
+
+- Natural-language questions about the codebase, modules, call paths, or design.
+- Tracing relationships between concepts, packages, or features.
+- Orienting in unfamiliar areas before reading many files.
+
+Skip graphify for: explicit `/graphify` rebuild commands, formatting-only edits,
+single-file bug fixes where you already know the file, or when
+`graphify-out/graph.json` is missing.
+
+## Workflow
+
+1. From the repository root, check `graphify-out/graph.json`.
+2. If present, run graphify **before** large `grep`/manual file walks:
+
+   ```bash
+   graphify query "<user question in plain language>"
+   graphify path "<concept A>" "<concept B>"
+   graphify explain "<node or concept name>"
+   ```
+
+3. Use query output to pick files to read; verify critical claims in source.
+4. Optional context: `graphify-out/GRAPH_REPORT.md` and `graphify-out/wiki/`
+   (if generated).
+
+## If the graph is missing or stale
+
+Tell the user the graph is absent or may be outdated. Suggest building or
+updating locally (do not commit `graphify-out/`):
+
+```bash
+graphify .
+graphify . --update
+```
+
+Do not treat graphify edges as ground truth without spot-checking code; respect
+EXTRACTED vs INFERRED labels in graph output when present.
