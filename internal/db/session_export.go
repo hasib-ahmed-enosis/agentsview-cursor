@@ -1009,7 +1009,9 @@ func sessionExportClaudeSnapshotPeers(
 		}
 		rowsSQL := usageRowsSQLWithWhere(
 			usageMessageEligibility+" AND ("+strings.Join(predicates, " OR ")+")",
-			usageEventEligibility+" AND 1 = 0")
+			usageEventEligibility+" AND 1 = 0",
+			usageCursorSessionEligibility+" AND 1 = 0",
+		)
 		query := usageRowSelectFromRows(rowsSQL) + `
 			ORDER BY u.session_id ASC, u.ts ASC,
 				COALESCE(u.message_ordinal, -1) ASC`

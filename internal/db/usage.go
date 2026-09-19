@@ -412,6 +412,11 @@ const usageEventEligibility = `
 const usageEventSourceEligibility = `
     ue.model != ''`
 
+const usageCursorSessionEligibility = `
+    cu.session_id != ''
+    AND cu.model != ''
+    AND s.deleted_at IS NULL`
+
 const usageSessionEligibility = `s.deleted_at IS NULL`
 
 const usageRowsSQLTemplate = `
@@ -489,15 +494,52 @@ SELECT
 	COALESCE(s.started_at, '') AS started_at
 FROM usage_events ue
 JOIN sessions s ON s.id = ue.session_id
+WHERE %s
+
+UNION ALL
+
+SELECT
+	cu.session_id,
+	NULL AS message_ordinal,
+	'cursor' AS usage_source,
+	COALESCE(cu.occurred_at, s.started_at, '') AS ts,
+	COALESCE(cu.occurred_at, '') AS pricing_ts,
+	cu.model,
+	'' AS provider_id,
+	'' AS token_usage,
+	cu.input_tokens,
+	cu.output_tokens,
+	cu.cache_write_tokens AS cache_creation_input_tokens,
+	cu.cache_read_tokens AS cache_read_input_tokens,
+	0 AS reasoning_tokens,
+	CASE WHEN cu.kind = 'hook' THEN 0 ELSE cu.charged_microdollars END AS cost_microdollars,
+	'' AS cost_status,
+	CASE WHEN cu.kind = 'hook' THEN 'estimated' ELSE 'cursor-reported' END AS cost_source,
+	'' AS claude_message_id,
+	'' AS claude_request_id,
+	'' AS source_uuid,
+	cu.dedup_key AS usage_dedup_key,
+	s.project,
+	s.agent,
+	s.machine,
+	s.user_message_count,
+	COALESCE(s.is_automated, 0) AS is_automated,
+	COALESCE(NULLIF(s.ended_at, ''), NULLIF(s.started_at, ''), s.created_at) AS session_activity_at,
+	COALESCE(s.termination_status, '') AS termination_status,
+	COALESCE(NULLIF(COALESCE(s.display_name, s.session_name), ''), NULLIF(s.first_message, ''), NULLIF(s.project, ''), s.id) AS display_name,
+	COALESCE(s.started_at, '') AS started_at
+FROM cursor_usage_events cu
+JOIN sessions s ON s.id = cu.session_id
 WHERE %s`
 
 func usageRowsSQLWithWhere(
-	messageWhere, usageEventWhere string,
+	messageWhere, usageEventWhere, cursorWhere string,
 ) string {
 	return fmt.Sprintf(
 		usageRowsSQLTemplate,
 		messageWhere,
 		usageEventWhere,
+		cursorWhere,
 	)
 }
 
@@ -813,6 +855,7 @@ func usageRowSelect() string {
 	return usageRowSelectFromRows(usageRowsSQLWithWhere(
 		usageMessageEligibility,
 		usageEventEligibility,
+		usageCursorSessionEligibility,
 	))
 }
 
@@ -1069,7 +1112,7 @@ func usageSnapshotInputFilter(f UsageFilter) UsageFilter {
 
 const dailyCursorUsageRowsSQLTemplate = `
 SELECT
-	'' AS session_id,
+	cu.session_id AS session_id,
 	NULL AS message_ordinal,
 	'cursor' AS usage_source,
 	cu.occurred_at AS ts,
@@ -1082,30 +1125,33 @@ SELECT
 	cu.cache_write_tokens AS cache_creation_input_tokens,
 	cu.cache_read_tokens AS cache_read_input_tokens,
 	0 AS reasoning_tokens,
-	cu.charged_microdollars AS cost_microdollars,
-	'cursor-reported' AS cost_source,
+	CASE WHEN cu.kind = 'hook' THEN 0 ELSE cu.charged_microdollars END AS cost_microdollars,
+	CASE WHEN cu.kind = 'hook' THEN 'estimated' ELSE 'cursor-reported' END AS cost_source,
 	'' AS claude_message_id,
 	'' AS claude_request_id,
 	'' AS source_uuid,
 	cu.dedup_key AS usage_dedup_key,
-	'' AS project,
-	'cursor' AS agent,
-	'' AS machine
+	COALESCE(s.project, '') AS project,
+	COALESCE(NULLIF(s.agent, ''), 'cursor') AS agent,
+	COALESCE(s.machine, '') AS machine
 FROM cursor_usage_events cu
+LEFT JOIN sessions s ON cu.session_id != ''
+	AND s.id = cu.session_id
+	AND s.deleted_at IS NULL
 WHERE %s`
+
+func cursorUsageNeedsSessionJoin(f UsageFilter) bool {
+	termPred, _ := buildUsageTerminationPredSQLite(f.Termination)
+	return len(f.ProjectFilterLabels()) > 0 ||
+		len(f.ExcludedProjectFilterLabels()) > 0 ||
+		f.Machine != "" || f.GitBranch != "" || f.MinUserMessages > 0 ||
+		termPred != "" || f.ActiveSince != ""
+}
 
 func cursorUsageRowsSQLForBounds(
 	f UsageFilter, b usageBounds,
 ) (string, []any, bool) {
-	termPred, _ := buildUsageTerminationPredSQLite(f.Termination)
-	// Cursor usage rows carry no project or git branch and bypass the session
-	// filter, so any filter they cannot satisfy (project, machine, branch)
-	// must exclude them entirely rather than let them leak into totals.
-	if len(f.ProjectFilterLabels()) > 0 ||
-		len(f.ExcludedProjectFilterLabels()) > 0 ||
-		f.Machine != "" || f.GitBranch != "" || f.MinUserMessages > 0 ||
-		f.ExcludeOneShot || termPred != "" ||
-		f.ActiveSince != "" {
+	if f.ExcludeOneShot {
 		return "", nil, false
 	}
 	if f.Agent != "" {
@@ -1137,6 +1183,11 @@ func cursorUsageRowsSQLForBounds(
 		where, args, "cu.model",
 	)
 	where, args = appendUsageColumnBounds(where, "cu.occurred_at", b, args)
+	if cursorUsageNeedsSessionJoin(f) {
+		where += "\n\tAND cu.session_id != ''"
+		where += "\n\tAND s.id IS NOT NULL"
+		where, args = f.appendUsageSessionFilterClauses(where, args)
+	}
 	rowsSQL := fmt.Sprintf(dailyCursorUsageRowsSQLTemplate, where)
 	return rowsSQL, args, true
 }

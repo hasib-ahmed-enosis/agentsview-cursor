@@ -2567,6 +2567,10 @@ func schemaColumnMigrations() []schemaColumnMigration {
 			"sessions", "sync_marker",
 			"ALTER TABLE sessions ADD COLUMN sync_marker TEXT",
 		},
+		{
+			"cursor_usage_events", "session_id",
+			"ALTER TABLE cursor_usage_events ADD COLUMN session_id TEXT NOT NULL DEFAULT ''",
+		},
 	}
 }
 

@@ -53,10 +53,15 @@ future agents can opt into either behavior independently.
 
 ### Cursor Admin Usage Events
 
-Cursor has two usage sources in AgentsView:
+Cursor has three usage sources in AgentsView:
 
-- local Cursor transcripts, when `~/.cursor/projects` contains usable token
-  metadata
+- durable local hook telemetry at `~/.agentsview/cursor-hook-usage.jsonl`
+  (override the data directory with `AGENTSVIEW_DATA_DIR`). The Cursor hook
+  script writes only this file. AgentsView ingests it into the Usage dashboard
+  on `agentsview sync`, `agentsview serve` sync passes, and
+  `agentsview usage cursor-hook`, and merges the same file during Cursor
+  transcript parse for per-message session detail
+- local Cursor transcripts alone do not carry token fields in the transcript body
 - Cursor Admin API usage events, imported on demand with
   `agentsview usage cursor`
 
@@ -92,6 +97,60 @@ push/sync path. They appear as `agent = cursor`; because Cursor Admin events are
 account-level billing rows rather than session transcripts, project, machine,
 session-count, and top-session filters do not apply to those rows. Model and
 date filters do apply.
+
+Hook-ingested rows use the same `cursor_usage_events` table and dashboard union
+as Admin API rows. They are tagged with `kind = hook`, priced from the LiteLLM
+model table when Cursor does not supply `chargedCents`, and do not require
+`cursor_admin_api_key`. While `agentsview serve` runs, new JSONL lines are
+ingested automatically (in addition to post-sync ingest). Hook rows that map to
+a local Cursor session (`cursor:{conversation_id}`) participate in project and
+session-scoped Usage filters; account-level Admin API rows still ignore project
+filters when `session_id` is empty. Run
+`agentsview usage cursor-hook --backfill-session-ids` once after upgrading to
+link older hook rows to sessions.
+
+#### Cursor hook setup (local token telemetry)
+
+The hook script lives at `scripts/cursor-hooks/log-agent-token-usage.ps1`. It
+writes **only** to the global JSONL file under the AgentsView data directory
+(`~/.agentsview/cursor-hook-usage.jsonl` by default). AgentsView uses that file
+for the Usage dashboard (`agentsview usage cursor-hook`, automatic ingest after
+sync) and to attach token counts to Cursor assistant messages during transcript
+parse.
+
+**Install**
+
+1. Copy `scripts/cursor-hooks/log-agent-token-usage.ps1` to a permanent path,
+   e.g. `~/.cursor/hooks/log-agent-token-usage.ps1`.
+2. Add hook entries to `~/.cursor/hooks.json` for `afterAgentResponse`,
+   `stop`, `preCompact`, and `subagentStop`, each running the script. On
+   Windows:
+
+   ```json
+   {
+     "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\you\\.cursor\\hooks\\log-agent-token-usage.ps1\""
+   }
+   ```
+
+   On macOS or Linux, use `pwsh -NoProfile -File "/path/to/log-agent-token-usage.ps1"`.
+3. Reload Cursor hooks or restart Cursor after changes.
+
+**Import**
+
+```bash
+# Import hook telemetry immediately (also runs automatically after sync)
+agentsview usage cursor-hook
+```
+
+**Troubleshooting**
+
+- Confirm new lines appear in `~/.agentsview/cursor-hook-usage.jsonl` after an
+  agent turn.
+- Read `cursor-hook-errors.log` in the data directory when the log stays empty.
+- Set `CURSOR_TOKEN_HOOK_DEBUG=1` to capture raw hook payloads in
+  `cursor-hook-usage-debug.jsonl`.
+- Override the data directory with `AGENTSVIEW_DATA_DIR`; the hook and AgentsView
+  must agree on the same value.
 
 Costs for admin rows come from Cursor's `chargedCents` field instead of
 AgentsView's model-pricing table, so they can report spend even for models that
@@ -959,6 +1018,19 @@ The API key is required and can be supplied as `cursor_admin_api_key` in
 `~/.agentsview/config.toml` or as `AGENTSVIEW_CURSOR_ADMIN_API_KEY`. Optional
 default member filters can be supplied with `cursor_admin_email` /
 `cursor_admin_user_id` or their matching environment variables.
+
+## `agentsview usage cursor-hook`
+
+Import hook telemetry from `~/.agentsview/cursor-hook-usage.jsonl` (or the
+directory set by `AGENTSVIEW_DATA_DIR`). No Admin API key is required. Sync runs
+the same ingest after each pass.
+
+```bash
+agentsview usage cursor-hook
+```
+
+Hook rows are stored in `cursor_usage_events` with `kind = hook` and estimated
+costs from the LiteLLM pricing table.
 
 ### Example: Starship Prompt Module
 

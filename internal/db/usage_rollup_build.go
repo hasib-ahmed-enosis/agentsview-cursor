@@ -421,11 +421,12 @@ func loadCursorUsageRollupBuild(
 		},
 		FactRevision: highWater,
 	}
-	rows, err := conn.QueryContext(ctx, `SELECT source_id, timestamp_ms,
-		raw_timestamp, model, input_tokens, output_tokens,
-		cache_creation_tokens, cache_read_tokens, charged_microdollars,
-		is_headless, dedup_key
-		FROM cursor_usage_facts WHERE source_id <= ? ORDER BY source_id`,
+	rows, err := conn.QueryContext(ctx, `SELECT cf.source_id, cf.timestamp_ms,
+		cf.raw_timestamp, cf.model, cf.input_tokens, cf.output_tokens,
+		cf.cache_creation_tokens, cf.cache_read_tokens, cf.charged_microdollars,
+		cf.is_headless, cf.dedup_key, cf.kind, cf.session_id
+		FROM cursor_usage_facts cf
+		WHERE cf.source_id <= ? ORDER BY cf.source_id`,
 		highWater)
 	if err != nil {
 		return build, err
@@ -438,20 +439,30 @@ func loadCursorUsageRollupBuild(
 		var millis sql.NullInt64
 		var charged int64
 		var isHeadless int
+		var kind, linkedSession string
 		if err := rows.Scan(&sourceID, &millis, &fact.Fact.RawTimestamp,
 			&fact.Model, &fact.Fact.InputTokens, &fact.Fact.OutputTokens,
 			&fact.Fact.CacheCreationTokens, &fact.Fact.CacheReadTokens, &charged,
-			&isHeadless, &fact.Fact.UsageDedupKey); err != nil {
+			&isHeadless, &fact.Fact.UsageDedupKey, &kind, &linkedSession); err != nil {
 			return build, err
 		}
 		fact.IsHeadless = isHeadless != 0
+		if strings.TrimSpace(linkedSession) != "" {
+			fact.SourceSessionID = linkedSession
+			fact.AttributionSessionID = linkedSession
+		}
 		fact.FactIndex = int(sourceID)
 		fact.Fact.Source = "cursor"
 		fact.Fact.Model = fact.Model
 		fact.Fact.CostSource = "cursor-reported"
 		fact.Fact.RequestScoped = true
 		fact.Fact.TokenEligible = true
-		fact.Fact.ReportedCostMicrodollars = &charged
+		if strings.TrimSpace(kind) == "hook" {
+			fact.Fact.CostSource = "estimated"
+			fact.Fact.ReportedCostMicrodollars = nil
+		} else {
+			fact.Fact.ReportedCostMicrodollars = &charged
+		}
 		if millis.Valid {
 			value := millis.Int64
 			fact.Fact.TimestampMillis, fact.EffectiveMillis = &value, &value

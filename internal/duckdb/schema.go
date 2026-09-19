@@ -388,7 +388,8 @@ var mirrorTables = []tableSpec{
 			user_id TEXT NOT NULL DEFAULT '',
 			user_email TEXT NOT NULL DEFAULT '',
 			is_headless BOOLEAN NOT NULL DEFAULT FALSE,
-			dedup_key TEXT NOT NULL DEFAULT ''
+			dedup_key TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT ''
 		)`,
 		columns: []columnSpec{
 			{"id", "id BIGINT"},
@@ -405,6 +406,7 @@ var mirrorTables = []tableSpec{
 			{"user_email", "user_email TEXT NOT NULL DEFAULT ''"},
 			{"is_headless", "is_headless BOOLEAN NOT NULL DEFAULT FALSE"},
 			{"dedup_key", "dedup_key TEXT NOT NULL DEFAULT ''"},
+			{"session_id", "session_id TEXT NOT NULL DEFAULT ''"},
 		},
 		indexes: []string{
 			"CREATE UNIQUE INDEX IF NOT EXISTS idx_cursor_usage_events_dedup ON cursor_usage_events(dedup_key)",

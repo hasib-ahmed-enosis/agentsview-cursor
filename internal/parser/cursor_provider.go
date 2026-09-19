@@ -147,6 +147,14 @@ func (p *cursorProvider) Parse(
 			enrichErr = fmt.Errorf("cursor store %s: %w", storePath, enrichErr)
 		}
 	}
+	if tokenLogErr := enrichCursorSessionFromTokenLog(path, cwd, msgs); tokenLogErr != nil {
+		if errors.Is(tokenLogErr, context.Canceled) ||
+			errors.Is(tokenLogErr, context.DeadlineExceeded) {
+			return ParseOutcome{}, tokenLogErr
+		}
+		log.Printf("warning: cursor token log: %v", tokenLogErr)
+	}
+	accumulateMessageTokenUsage(sess, msgs)
 	if errors.Is(enrichErr, errCursorStoreFormat) {
 		log.Printf("warning: %v; using Cursor transcript only", enrichErr)
 	} else if enrichErr != nil {
@@ -779,6 +787,9 @@ func (s cursorSourceSet) SourcesForChangedPath(
 			return []SourceRef{source}, nil
 		}
 	}
+	if cursorTokenLogChangedPath(req.Path) {
+		return s.sourcesForTokenLogPath(req.Path, req.Path)
+	}
 	for _, root := range s.roots {
 		if sources, err := s.sourcesForStorePath(root, req.Path); err != nil {
 			return nil, err
@@ -948,6 +959,20 @@ func (s cursorSourceSet) Fingerprint(
 			hash = "store:" + stateHash
 		} else {
 			hash = hash + "|store:" + stateHash
+		}
+	}
+	cwd := ""
+	if source.CwdResolution.State == SourceCwdResolved {
+		cwd = source.CwdResolution.Path
+	}
+	if tokenLogMtime, err := cursorTokenLogCompositeMtime(cwd); err != nil {
+		return SourceFingerprint{}, fmt.Errorf("fingerprint cursor token log: %w", err)
+	} else if tokenLogMtime > mtime {
+		mtime = tokenLogMtime
+		if hash == "" {
+			hash = fmt.Sprintf("tokenlog:%d", tokenLogMtime)
+		} else {
+			hash = hash + fmt.Sprintf("|tokenlog:%d", tokenLogMtime)
 		}
 	}
 	return SourceFingerprint{
@@ -1219,11 +1244,12 @@ func cursorProviderCapabilities() Capabilities {
 			S3Discovery:          CapabilitySupported,
 		},
 		Content: ContentCapabilities{
-			FirstMessage:     CapabilitySupported,
-			Thinking:         CapabilitySupported,
-			ToolCalls:        CapabilitySupported,
-			ToolResults:      CapabilitySupported,
-			ToolResultEvents: CapabilitySupported,
+			FirstMessage:         CapabilitySupported,
+			Thinking:             CapabilitySupported,
+			ToolCalls:            CapabilitySupported,
+			ToolResults:          CapabilitySupported,
+			ToolResultEvents:     CapabilitySupported,
+			PerMessageTokenUsage: CapabilitySupported,
 		},
 		Sync: ProviderSyncSemantics{
 			FingerprintHashInCacheKey:           true,

@@ -1179,6 +1179,8 @@ type usageCursorInstall struct {
 	id, charged int64
 	timestamp   string
 	model       string
+	kind        string
+	sessionID   string
 	dedup       string
 	headless    int
 	fact        usagefacts.Fact
@@ -1230,9 +1232,9 @@ func (c *usageFillCoordinator) readCursorBatch(
 			fmt.Errorf("%w while copying Cursor usage", errUsageCacheSourceChanged)
 	}
 	rows, err := archiveTx.QueryContext(ctx, `
-		SELECT id, occurred_at, model, input_tokens, output_tokens,
-		       cache_write_tokens, cache_read_tokens, charged_microdollars,
-		       is_headless, dedup_key
+		SELECT id, occurred_at, model, kind, session_id, input_tokens,
+		       output_tokens, cache_write_tokens, cache_read_tokens,
+		       charged_microdollars, is_headless, dedup_key
 		FROM cursor_usage_events WHERE id > ? AND id <= ?
 		ORDER BY id LIMIT ?`, from, target, usageCursorCopyBatchSize)
 	if err != nil {
@@ -1243,9 +1245,9 @@ func (c *usageFillCoordinator) readCursorBatch(
 		var install usageCursorInstall
 		var input, output, cacheWrite, cacheRead int64
 		if err := rows.Scan(
-			&install.id, &install.timestamp, &install.model,
-			&input, &output, &cacheWrite, &cacheRead, &install.charged,
-			&install.headless, &install.dedup,
+			&install.id, &install.timestamp, &install.model, &install.kind,
+			&install.sessionID, &input, &output, &cacheWrite, &cacheRead,
+			&install.charged, &install.headless, &install.dedup,
 		); err != nil {
 			_ = rows.Close()
 			return nil, false, err
@@ -1283,13 +1285,14 @@ func (c *usageFillCoordinator) installCursorBatch(
 		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO cursor_usage_facts(
 			source_id, timestamp_ms, raw_timestamp, model,
 			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-			charged_microdollars, is_headless, dedup_key
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			charged_microdollars, is_headless, dedup_key, kind, session_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			install.id, install.fact.TimestampMillis,
 			install.timestamp, install.model,
 			install.fact.InputTokens, install.fact.OutputTokens,
 			install.fact.CacheCreationTokens, install.fact.CacheReadTokens,
-			install.charged, install.headless, install.dedup,
+			install.charged, install.headless, install.dedup, install.kind,
+			install.sessionID,
 		); err != nil {
 			return err
 		}

@@ -607,6 +607,9 @@ func filterUsageRollupOwners(
 	result := facts[:0]
 	for _, fact := range facts {
 		if fact.AttributionSessionID == "" {
+			if cursorUsageNeedsSessionJoin(filter) {
+				continue
+			}
 			if usageCursorIncluded(filter) &&
 				usageCursorAutomatedScopePasses(filter, fact.IsHeadless) &&
 				usageRollupModelPasses(filter, fact.Model) {

@@ -1020,6 +1020,11 @@ func coordinateLocalSync(
 	if !stats.ProcessingComplete() {
 		return didResync, stats, errors.New("local sync processing incomplete")
 	}
+	if count, ingestErr := ingestCursorHookUsage(ctx, appCfg, database); ingestErr != nil {
+		logCursorHookIngest(0, ingestErr)
+	} else {
+		logCursorHookIngest(count, nil)
+	}
 	return didResync, stats, nil
 }
 

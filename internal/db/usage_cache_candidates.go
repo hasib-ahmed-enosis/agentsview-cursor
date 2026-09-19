@@ -234,6 +234,14 @@ func usageCandidateDiscoverySQL(
 		WHERE `+usageEventSourceEligibility+`
 		  AND s.deleted_at IS NULL
 		  AND (ue.occurred_at IS NULL OR ue.occurred_at = '')`, "s.started_at")
+	appendBranch(`SELECT cu.session_id
+		FROM cursor_usage_events AS cu INDEXED BY idx_cursor_usage_events_occurred
+		JOIN sessions s ON s.id = cu.session_id
+		WHERE cu.session_id != ''
+		  AND cu.model != ''
+		  AND s.deleted_at IS NULL
+		  AND cu.occurred_at IS NOT NULL AND cu.occurred_at != ''`,
+		"cu.occurred_at")
 
 	if kind == usageQueryKindActivity {
 		appendBranch(`SELECT m.session_id

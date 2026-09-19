@@ -230,6 +230,11 @@ func runSyncWorkerStartup(
 	if result.Status != "ok" || !result.DiscoveryComplete {
 		return fmt.Errorf("sync worker %s: %s", mode, result.Status)
 	}
+	if count, ingestErr := ingestCursorHookUsage(ctx, cfg, database); ingestErr != nil {
+		logCursorHookIngest(0, ingestErr)
+	} else {
+		logCursorHookIngest(count, nil)
+	}
 	return nil
 }
 

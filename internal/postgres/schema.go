@@ -280,7 +280,8 @@ CREATE TABLE IF NOT EXISTS cursor_usage_events (
     user_id TEXT NOT NULL DEFAULT '',
     user_email TEXT NOT NULL DEFAULT '',
     is_headless BOOLEAN NOT NULL DEFAULT FALSE,
-    dedup_key TEXT NOT NULL DEFAULT ''
+    dedup_key TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cursor_usage_events_dedup
@@ -1371,6 +1372,11 @@ func EnsureSchema(
 			"sessions", "file_path",
 			`file_path TEXT`,
 			"adding sessions.file_path",
+		},
+		{
+			"cursor_usage_events", "session_id",
+			`session_id TEXT NOT NULL DEFAULT ''`,
+			"adding cursor_usage_events.session_id",
 		},
 	}
 	step = time.Now()
@@ -2664,7 +2670,7 @@ func CheckSchemaCompat(
 				input_tokens, output_tokens,
 				cache_write_tokens, cache_read_tokens,
 				charged_microdollars, cursor_token_fee_microdollars,
-				user_id, user_email, is_headless, dedup_key
+				user_id, user_email, is_headless, dedup_key, session_id
 			 FROM cursor_usage_events LIMIT 0`)
 		if err != nil {
 			return fmt.Errorf(

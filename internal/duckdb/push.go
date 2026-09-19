@@ -1507,14 +1507,14 @@ func (s *Sync) bulkInsertCursorUsageEvents(
 			input_tokens, output_tokens,
 			cache_write_tokens, cache_read_tokens,
 			charged_microdollars, cursor_token_fee_microdollars,
-			user_id, user_email, is_headless, dedup_key
+			user_id, user_email, is_headless, dedup_key, session_id
 		) VALUES `)
-		args := make([]any, 0, len(batch)*13)
+		args := make([]any, 0, len(batch)*14)
 		for j, ev := range batch {
 			if j > 0 {
 				b.WriteByte(',')
 			}
-			b.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			b.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 			occurredAt, ok := parseTimestamp(ev.OccurredAt)
 			if !ok {
 				return fmt.Errorf("parsing cursor usage occurred_at %q", ev.OccurredAt)
@@ -1533,6 +1533,7 @@ func (s *Sync) bulkInsertCursorUsageEvents(
 				db.SanitizeUTF8(ev.UserEmail),
 				ev.IsHeadless,
 				db.SanitizeUTF8(ev.DedupKey),
+				db.SanitizeUTF8(ev.SessionID),
 			)
 		}
 		b.WriteString(` ON CONFLICT DO NOTHING`)

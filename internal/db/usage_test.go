@@ -1026,6 +1026,119 @@ func TestGetDailyUsageIncludesCursorUsageEventsWithSessionDefaults(t *testing.T)
 	assert.Equal(t, 0, result.SessionCounts.Total, "cursor rows should not count as sessions")
 }
 
+func TestGetDailyUsageIncludesCursorHookEvents(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, d.UpsertModelPricing([]ModelPricing{{
+		ModelPattern:  "claude-4.6-opus-high-thinking",
+		InputPerMTok:  money.MustParseDollars("3.0"),
+		OutputPerMTok: money.MustParseDollars("15.0"),
+	}}), "UpsertModelPricing")
+
+	require.NoError(t, d.InsertCursorUsageEvents([]CursorUsageEvent{{
+		OccurredAt:   "2026-05-14T10:05:00Z",
+		Model:        "claude-4.6-opus-high-thinking",
+		Kind:         "hook",
+		InputTokens:  1000,
+		OutputTokens: 500,
+	}}), "InsertCursorUsageEvents")
+
+	result, err := d.GetDailyUsage(ctx, UsageFilter{
+		From:       "2026-05-14",
+		To:         "2026-05-14",
+		Breakdowns: true,
+	})
+	require.NoError(t, err, "GetDailyUsage cursor hook")
+	require.Len(t, result.Daily, 1, "daily len")
+	day := result.Daily[0]
+	assert.Equal(t, 1000, day.InputTokens, "InputTokens")
+	assert.Equal(t, 500, day.OutputTokens, "OutputTokens")
+	assert.True(t, day.TotalCost.Microdollars > 0, "estimated hook cost")
+	require.Len(t, day.AgentBreakdowns, 1)
+	assert.Equal(t, "cursor", day.AgentBreakdowns[0].Agent)
+}
+
+func TestGetDailyUsageIncludesCursorHookEventsWithProjectFilter(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	sessionID := "cursor:deadbeef-cafe-babe-0000-0000abcdef012345"
+
+	require.NoError(t, d.UpsertModelPricing([]ModelPricing{{
+		ModelPattern:  "hook-model",
+		InputPerMTok:  money.MustParseDollars("1.0"),
+		OutputPerMTok: money.MustParseDollars("1.0"),
+	}}), "UpsertModelPricing")
+
+	insertSession(t, d, sessionID, "hook-proj", func(s *Session) {
+		s.Agent = "cursor"
+		s.StartedAt = Ptr("2026-05-14T09:00:00Z")
+	})
+
+	require.NoError(t, d.InsertCursorUsageEvents([]CursorUsageEvent{{
+		OccurredAt:   "2026-05-14T10:05:00Z",
+		Model:        "hook-model",
+		Kind:         "hook",
+		InputTokens:  200,
+		OutputTokens: 100,
+		SessionID:    sessionID,
+	}}), "InsertCursorUsageEvents")
+
+	result, err := d.GetDailyUsage(ctx, UsageFilter{
+		From:       "2026-05-14",
+		To:         "2026-05-14",
+		Project:    "hook-proj",
+		Breakdowns: true,
+	})
+	require.NoError(t, err, "GetDailyUsage hook project filter")
+	require.Len(t, result.Daily, 1)
+	assert.Equal(t, 200, result.Daily[0].InputTokens)
+}
+
+func TestGetDailyUsageCursorHookNotDoubleCountedWithTokenOnlyMessages(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	sessionID := "cursor:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	require.NoError(t, d.UpsertModelPricing([]ModelPricing{{
+		ModelPattern:  "hook-model",
+		InputPerMTok:  money.MustParseDollars("1.0"),
+		OutputPerMTok: money.MustParseDollars("1.0"),
+	}}), "UpsertModelPricing")
+
+	insertSession(t, d, sessionID, "hook-proj", func(s *Session) {
+		s.Agent = "cursor"
+		s.StartedAt = Ptr("2026-05-14T09:00:00Z")
+	})
+	insertMessages(t, d, Message{
+		SessionID: sessionID,
+		Ordinal:   0,
+		Role:      "assistant",
+		Timestamp: "2026-05-14T10:00:00Z",
+		TokenUsage: jsontext.Value(
+			`{"input_tokens":999,"output_tokens":1}`,
+		),
+	})
+
+	require.NoError(t, d.InsertCursorUsageEvents([]CursorUsageEvent{{
+		OccurredAt:   "2026-05-14T10:05:00Z",
+		Model:        "hook-model",
+		Kind:         "hook",
+		InputTokens:  200,
+		OutputTokens: 100,
+		SessionID:    sessionID,
+	}}), "InsertCursorUsageEvents")
+
+	result, err := d.GetDailyUsage(ctx, UsageFilter{
+		From: "2026-05-14",
+		To:   "2026-05-14",
+	})
+	require.NoError(t, err, "GetDailyUsage hook without message double count")
+	require.Len(t, result.Daily, 1)
+	assert.Equal(t, 200, result.Daily[0].InputTokens,
+		"hook billing rows should not add message tokens without model")
+}
+
 func TestGetDailyUsageSkipsCursorUsageEventsForExcludeOneShot(t *testing.T) {
 	d := testDB(t)
 	ctx := context.Background()
@@ -1142,6 +1255,65 @@ func TestInsertCursorUsageEventsDedupesAtPostgresTimestampPrecision(t *testing.T
 	).Scan(&count))
 	assert.Equal(t, 1, count,
 		"timestamps PostgreSQL stores identically must share one fingerprint")
+}
+
+func TestGetCursorUsageEventsRoundTripsSessionID(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+
+	event := CursorUsageEvent{
+		OccurredAt:   "2026-05-14T10:05:00Z",
+		Model:        "hook-model",
+		Kind:         "hook",
+		InputTokens:  10,
+		OutputTokens: 5,
+		DedupKey:     "dedup-session-round-trip",
+		SessionID:    "cursor:deadbeef-cafe-babe-0000-0000abcdef012345",
+	}
+	require.NoError(t, d.InsertCursorUsageEvents([]CursorUsageEvent{event}))
+
+	events, err := d.GetCursorUsageEvents(ctx, 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, event.SessionID, events[0].SessionID,
+		"session_id must round-trip so mirrors (DuckDB/Postgres) receive it")
+}
+
+func TestUpdateCursorUsageEventSessionID(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+
+	event := CursorUsageEvent{
+		OccurredAt:   "2026-05-14T10:05:00Z",
+		Model:        "hook-model",
+		Kind:         "hook",
+		InputTokens:  10,
+		OutputTokens: 5,
+		DedupKey:     "dedup-backfill-target",
+	}
+	require.NoError(t, d.InsertCursorUsageEvents([]CursorUsageEvent{event}))
+
+	n, err := d.UpdateCursorUsageEventSessionID(
+		ctx, "dedup-backfill-target", "cursor:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	events, err := d.GetCursorUsageEvents(ctx, 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "cursor:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", events[0].SessionID)
+
+	// Re-running with a different session_id must be a no-op once set.
+	n, err = d.UpdateCursorUsageEventSessionID(
+		ctx, "dedup-backfill-target", "cursor:ffffffff-ffff-ffff-ffff-ffffffffffff",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "existing session_id should not be overwritten")
+
+	n, err = d.UpdateCursorUsageEventSessionID(ctx, "does-not-exist", "cursor:x")
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
 }
 
 // TestGetDailyUsage_CacheSavingsUsesPerModelRates pins down

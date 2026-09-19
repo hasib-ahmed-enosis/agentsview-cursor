@@ -42,7 +42,11 @@ const (
 	// at the untagged model's catalog rate. EffectivePricingDigest hashes
 	// only catalog rows, so the same facts and catalog would otherwise keep
 	// the unpriced costs.
-	usageCacheFormatVersion             = 12
+	// Version 13 rebuilds version 12 cursor facts so hook rows carry kind on
+	// the usage-cache copy instead of joining archive cursor_usage_events.
+	// Version 14 rebuilds version 13 cursor facts with session_id so filtered
+	// rollups can attribute hook rows without account-level Cursor totals.
+	usageCacheFormatVersion             = 14
 	usageCacheApplicationID             = 0x41565543
 	usageCacheKind                      = "agentsview-usage-facts"
 	usageCacheRetirementProtocolVersion = 1
@@ -120,7 +124,9 @@ CREATE TABLE cursor_usage_facts (
     cache_read_tokens INTEGER NOT NULL,
     charged_microdollars INTEGER NOT NULL,
     is_headless INTEGER NOT NULL CHECK (is_headless IN (0, 1)),
-    dedup_key TEXT NOT NULL
+    dedup_key TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX cursor_usage_facts_dedup_key
     ON cursor_usage_facts (dedup_key);
@@ -766,7 +772,7 @@ func usageCacheSchemaComplete(ctx context.Context, database *sql.DB) bool {
 		`SELECT source_id, timestamp_ms, raw_timestamp, model,
 		        input_tokens, output_tokens, cache_creation_tokens,
 		        cache_read_tokens, charged_microdollars,
-		        is_headless, dedup_key
+		        is_headless, dedup_key, kind, session_id
 		 FROM cursor_usage_facts LIMIT 0`,
 		`SELECT id, timezone_key, timezone_name, interval_fingerprint,
 		        last_requested_at

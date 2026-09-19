@@ -1443,14 +1443,15 @@ func (d *DB) CopySessionMetadataFrom(
 				input_tokens, output_tokens,
 				cache_write_tokens, cache_read_tokens,
 				charged_microdollars, cursor_token_fee_microdollars,
-				user_id, user_email, is_headless, dedup_key
+				user_id, user_email, is_headless, dedup_key, session_id
 			)
 			SELECT
 				occurred_at, model, kind,
 				input_tokens, output_tokens,
 				cache_write_tokens, cache_read_tokens,
 				charged_microdollars, cursor_token_fee_microdollars,
-				user_id, user_email, is_headless, dedup_key
+				user_id, user_email, is_headless, dedup_key,
+				COALESCE(session_id, '')
 			FROM old_db.cursor_usage_events
 			ORDER BY occurred_at, id`); err != nil {
 			return fmt.Errorf("copying cursor usage events: %w", err)

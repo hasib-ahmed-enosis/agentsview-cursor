@@ -22,6 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/agentsview/internal/config"
+	"go.kenn.io/agentsview/internal/cursorhook"
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/recall/extract"
@@ -559,6 +560,20 @@ func runServe(cfg config.Config, opts serveOptions) {
 		go idleTracker.Run(ctx)
 	}
 	startDaemonUsageCacheBackfill(ctx, database, idleTracker)
+	stopHookUsageWatch := cursorhook.StartUsageLogWatcher(
+		ctx, cfg.DataDir, database, watcherBatchDelay,
+	)
+	defer stopHookUsageWatch()
+	if idleTracker != nil {
+		go idleTracker.Do(func() {
+			n, err := cursorhook.BackfillSessionIDs(ctx, database, cfg.DataDir)
+			if err != nil && ctx.Err() == nil {
+				log.Printf("cursor hook session_id backfill: %v", err)
+			} else if n > 0 && ctx.Err() == nil {
+				log.Printf("backfilled session_id on %d cursor hook usage row(s)", n)
+			}
+		})
+	}
 	if engine != nil && opts.SkipInitialSync {
 		go func() {
 			timer := time.NewTimer(deferredStartupSyncGracePeriod)
@@ -996,6 +1011,13 @@ func newForegroundSyncRunner(
 				ctx, daemonCtx, cfg, engine, database, lock, onLine,
 			)
 			if err == nil || !workerNeverRan(err) {
+				if err == nil {
+					if count, ingestErr := ingestCursorHookUsage(ctx, cfg, database); ingestErr != nil {
+						logCursorHookIngest(0, ingestErr)
+					} else {
+						logCursorHookIngest(count, nil)
+					}
+				}
 				return stats, err
 			}
 			log.Printf(
@@ -1003,9 +1025,17 @@ func newForegroundSyncRunner(
 					"(falling back in-process)", err,
 			)
 		}
-		return engine.SyncThenRun(
+		stats, err := engine.SyncThenRun(
 			ctx, false, progress, func(bool) error { return nil },
 		)
+		if err == nil {
+			if count, ingestErr := ingestCursorHookUsage(ctx, cfg, database); ingestErr != nil {
+				logCursorHookIngest(0, ingestErr)
+			} else {
+				logCursorHookIngest(count, nil)
+			}
+		}
+		return stats, err
 	}
 }
 

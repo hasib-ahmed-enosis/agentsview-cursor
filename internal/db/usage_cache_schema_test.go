@@ -66,7 +66,7 @@ func TestUsageCacheGenerationCreatesIdentifiedSchema(t *testing.T) {
 			"fact_count", "min_fact_timestamp_ms", "max_fact_timestamp_ms",
 		},
 		"cursor_usage_facts": {
-			"timestamp_ns", "kind", "cursor_token_fee_microdollars",
+			"timestamp_ns", "cursor_token_fee_microdollars",
 			"user_id", "user_email",
 		},
 		"usage_rollup_timezones": {"build_completed_at"},

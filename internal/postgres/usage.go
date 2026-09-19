@@ -812,7 +812,7 @@ func pgUsageRowQuery(pb *paramBuilder, f db.UsageFilter) string {
 
 const pgDailyCursorUsageRowsSQLTemplate = `
 SELECT
-	'' AS session_id,
+	cu.session_id AS session_id,
 	NULL::INT AS message_ordinal,
 	'cursor' AS usage_source,
 	cu.occurred_at AS ts,
@@ -825,29 +825,33 @@ SELECT
 	cu.cache_write_tokens AS cache_creation_input_tokens,
 	cu.cache_read_tokens AS cache_read_input_tokens,
 	0 AS reasoning_tokens,
-	cu.charged_microdollars AS cost_microdollars,
-	'cursor-reported' AS cost_source,
+	CASE WHEN cu.kind = 'hook' THEN 0 ELSE cu.charged_microdollars END AS cost_microdollars,
+	CASE WHEN cu.kind = 'hook' THEN 'estimated' ELSE 'cursor-reported' END AS cost_source,
 	'' AS claude_message_id,
 	'' AS claude_request_id,
 	'' AS source_uuid,
 	cu.dedup_key AS usage_dedup_key,
-	'' AS project,
-	'cursor' AS agent,
-	'' AS machine
+	COALESCE(s.project, '') AS project,
+	COALESCE(NULLIF(s.agent, ''), 'cursor') AS agent,
+	COALESCE(s.machine, '') AS machine
 FROM cursor_usage_events cu
+LEFT JOIN sessions s ON cu.session_id != ''
+	AND s.id = cu.session_id
+	AND s.deleted_at IS NULL
 WHERE %s`
+
+func pgCursorUsageNeedsSessionJoin(f db.UsageFilter) bool {
+	hasTermFilter := f.Termination != "" && f.Termination != "all"
+	return len(f.ProjectFilterLabels()) > 0 ||
+		len(f.ExcludedProjectFilterLabels()) > 0 ||
+		f.Machine != "" || f.GitBranch != "" || f.MinUserMessages > 0 ||
+		hasTermFilter || f.ActiveSince != ""
+}
 
 func pgCursorUsageRowsSQLForBounds(
 	pb *paramBuilder, f db.UsageFilter, b pgUsageBounds,
 ) (string, bool) {
-	hasTermFilter := f.Termination != "" && f.Termination != "all"
-	// Cursor usage rows carry no project or git branch and bypass the session
-	// filter, so any filter they cannot satisfy (project, machine, branch)
-	// must exclude them entirely rather than let them leak into totals.
-	if len(f.ProjectFilterLabels()) > 0 ||
-		len(f.ExcludedProjectFilterLabels()) > 0 ||
-		f.Machine != "" || f.GitBranch != "" || f.MinUserMessages > 0 ||
-		f.ExcludeOneShot || hasTermFilter || f.ActiveSince != "" {
+	if f.ExcludeOneShot {
 		return "", false
 	}
 	if f.Agent != "" {
@@ -880,6 +884,11 @@ func pgCursorUsageRowsSQLForBounds(
 	where = appendPGUsageColumnBounds(
 		where, "cu.occurred_at", b,
 	)
+	if pgCursorUsageNeedsSessionJoin(f) {
+		where += "\n\tAND cu.session_id != ''"
+		where += "\n\tAND s.id IS NOT NULL"
+		where = appendPGUsageSessionFilterClauses(where, pb, f)
+	}
 	return fmt.Sprintf(pgDailyCursorUsageRowsSQLTemplate, where), true
 }
 

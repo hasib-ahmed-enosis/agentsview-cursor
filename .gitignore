@@ -1,3 +1,6 @@
+# Local Windows CGO toolchain (scripts/setup-windows-toolchain.ps1)
+.toolchain/
+
 # Go binaries
 /agentsview
 /agentsview.exe

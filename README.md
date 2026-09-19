@@ -227,6 +227,80 @@ Features:
 - Timezone-aware date bucketing (`--timezone`)
 - Works standalone -- no server required, just run the command
 
+### Cursor: hook-based token telemetry
+
+Cursor transcripts do not carry reliable per-turn token fields. To fill the Usage
+dashboard and per-session Cursor message stats, install the Cursor hook script
+from this repository. It appends one JSON line per hook event to
+`~/.agentsview/cursor-hook-usage.jsonl` (or `$AGENTSVIEW_DATA_DIR/cursor-hook-usage.jsonl`
+when that variable is set). AgentsView reads that file during sync and via
+`agentsview usage cursor-hook`.
+
+1. **Copy the script** from `scripts/cursor-hooks/log-agent-token-usage.ps1` into
+   a stable location, for example `~/.cursor/hooks/log-agent-token-usage.ps1`.
+   The script is PowerShell; on Windows use Windows PowerShell or PowerShell 7.
+   On macOS or Linux, install [PowerShell](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
+   and invoke the same script with `pwsh`.
+
+2. **Register hooks** in `~/.cursor/hooks.json`. Point each listed event at the
+   script path you chose. Example (adjust the path):
+
+   ```json
+   {
+     "version": 1,
+     "hooks": {
+       "afterAgentResponse": [
+         {
+           "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\you\\.cursor\\hooks\\log-agent-token-usage.ps1\""
+         }
+       ],
+       "preCompact": [
+         {
+           "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\you\\.cursor\\hooks\\log-agent-token-usage.ps1\""
+         }
+       ],
+       "stop": [
+         {
+           "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\you\\.cursor\\hooks\\log-agent-token-usage.ps1\""
+         }
+       ],
+       "subagentStop": [
+         {
+           "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\you\\.cursor\\hooks\\log-agent-token-usage.ps1\""
+         }
+       ]
+     }
+   }
+   ```
+
+   On macOS or Linux, replace the command with `pwsh -NoProfile -File "/path/to/log-agent-token-usage.ps1"`.
+
+3. **Reload hooks** in Cursor after you create or edit `hooks.json` or update the
+   script (Cursor Settings → Hooks, or restart the editor if hooks do not pick up
+   changes).
+
+4. **Import into AgentsView** after agent turns (also runs automatically at the
+   end of `agentsview sync` and daemon sync passes):
+
+   ```bash
+   agentsview usage cursor-hook
+   agentsview sync
+   ```
+
+5. **Verify** the log file grows when you finish an agent turn, then confirm
+   `agentsview usage cursor-hook` reports ingested events and the Usage page /
+   `agentsview session usage <cursor-session-id>` show token data for Cursor
+   sessions.
+
+Hook failures append to `cursor-hook-errors.log` under the AgentsView data
+directory. Set `CURSOR_TOKEN_HOOK_DEBUG=1` to also write raw payloads to
+`cursor-hook-usage-debug.jsonl` in the same directory.
+
+Cursor Admin API import (`agentsview usage cursor`) is separate and optional; it
+does not replace the hook for local per-turn telemetry. See the
+[Token usage guide](https://agentsview.io/usage/) for Admin API setup and
+dashboard details.
+
 ## Per-Session Details
 
 `agentsview session usage <id>` prints per-session token statistics plus a cost
@@ -709,14 +783,117 @@ ______________________________________________________________________
 
 ## Development
 
-Requires Go 1.27+ (CGO), Node.js 24.11+.
+Build and run AgentsView from a git checkout when you are changing the Go
+backend, the Svelte frontend, or both. The commands below assume a Unix shell
+with `make` (macOS, Linux, or WSL). See [Windows](#windows-development) for
+native Windows builds.
+
+### Prerequisites
+
+- **Go 1.27+** with **CGO enabled** (SQLite driver and FTS5 require CGO; use
+  build tag `fts5`).
+- **Node.js 24.11+** and npm for the frontend (`frontend/`).
+- **C compiler** on the PATH for CGO (Xcode CLT on macOS, `gcc` on Linux).
+- **[air](https://github.com/air-verse/air)** for backend live reload
+  (`make air-install` installs it).
+
+Optional: [prek](https://github.com/j178/prek) and `uv` for git hooks
+(`make lint-tools` and `make install-hooks` after cloning).
+
+### First-time setup
 
 ```bash
-make dev            # Go server (dev mode)
-make frontend-dev   # Vite+ dev server (run alongside make dev)
-make build          # build binary with embedded frontend
-make install        # install to ~/.local/bin
+git clone https://github.com/kenn-io/agentsview.git
+cd agentsview
+make build          # embed frontend + compile agentsview binary
 ```
+
+`make build` runs `npm ci` and a production frontend build, copies assets into
+`internal/web/dist`, and links the binary as `./agentsview` in the repo root.
+Use `make install` to copy a release-style binary to `~/.local/bin`.
+
+### Run locally (backend + frontend dev)
+
+Typical full-stack work uses two terminals:
+
+```bash
+# Terminal 1 — Go API, sync, and embedded routes on :8080 (rebuilds on .go edits)
+make dev
+
+# Terminal 2 — Vite dev server; proxies /api to the backend
+make frontend-dev
+```
+
+Open the URL printed by `make frontend-dev` (Vite’s dev server, usually
+`http://127.0.0.1:5173`). The UI talks to the backend through the dev proxy;
+keep `make dev` running on port **8080** unless you set `VITE_API_TARGET` to
+another origin.
+
+Backend-only (no hot frontend): after `make build`, run `./agentsview serve` and
+open `http://127.0.0.1:8080`.
+
+Use a **separate data directory** while hacking so you do not overwrite your
+daily archive:
+
+```bash
+mkdir -p tmp/dev-data
+AGENTSVIEW_DATA_DIR="$PWD/tmp/dev-data" make dev
+# or: AGENTSVIEW_DATA_DIR="$PWD/tmp/dev-data" ./agentsview serve
+```
+
+The default data directory is `~/.agentsview/` (`sessions.db`, `config.toml`).
+The desktop app and an installed CLI share that path.
+
+To exercise UI code against a **copy of production data** without touching the
+live archive, use `make dev-snapshot` (see `Makefile` for `PROD_DATA_DIR` and
+`SNAPSHOT_DIR`).
+
+Desktop wrapper (Tauri): `make desktop-dev` from a separate checkout step after
+`cd desktop && npm ci`.
+
+### Windows development
+
+`make` is not required on Windows. From the repo root, the usual build-and-run
+loop is:
+
+```powershell
+.\scripts\build-windows.ps1 -Restart
+```
+
+That script embeds the frontend (`npm run build` into `internal/web/dist`),
+runs the pinned MSYS2 UCRT64 toolchain build (via `build-windows-msys.sh`, and
+calls `setup-windows-toolchain.ps1` once if needed), writes `agentsview.exe` in
+the repo root, then stops any running server and starts
+`.\agentsview.exe serve --no-browser`. Open `http://127.0.0.1:8080`.
+
+Useful flags:
+
+- **`-BackendOnly`** — skip the frontend; faster when you only changed Go code.
+- **`-FreshNpm`** — run `npm ci` before the frontend build (after
+  `package-lock.json` changes).
+
+`-Restart` prefers the repo-root binary. An older `agentsview` on your PATH (for
+example under `~/.agentsview/bin`) is not updated automatically; run
+`.\agentsview.exe` or copy the new binary if you rely on PATH.
+
+Optional isolated data directory (set before building/restarting):
+
+```powershell
+$env:AGENTSVIEW_DATA_DIR = "$PWD\tmp\dev-data"
+New-Item -ItemType Directory -Force -Path $env:AGENTSVIEW_DATA_DIR | Out-Null
+.\scripts\build-windows.ps1 -Restart
+```
+
+Requires [MSYS2](https://www.msys2.org/) at `C:\msys64`. The lower-level steps
+(`setup-windows-toolchain.ps1`, `build-windows-msys.sh`) are wrapped by
+`build-windows.ps1`; use them directly only when debugging the toolchain.
+
+For frontend hot reload, run `cd frontend; npm run dev` while the Go server
+listens on `127.0.0.1:8080` (or use WSL `make frontend-dev`). Windows on ARM
+and other manual CGO setups are in
+[Quick Start — Build from source](https://agentsview.io/quickstart/).
+
+### Tests and lint
 
 ```bash
 make test           # Go tests (CGO_ENABLED=1 -tags "fts5")
@@ -734,18 +911,21 @@ default fixture is 1,000 sessions and 64,000 messages; use
 When the Docker CLI uses a non-default socket, export `DOCKER_HOST` for that
 socket before running the benchmark.
 
-Pre-commit and pre-push hooks via [prek](https://github.com/j178/prek): run
-`make lint-tools` and `make install-hooks` after cloning (requires `prek` and
-`uv`).
+Frontend checks (from `frontend/`): `npm run check` and `npm run test` after
+`npm ci`; see `frontend/AGENTS.md`.
 
-### Project Layout
+### Project layout
 
 ```
 cmd/agentsview/     CLI entrypoint
 internal/           Go packages (config, db, parser, server, sync, postgres)
 frontend/           Svelte 5 SPA (Vite+, TypeScript)
 desktop/            Tauri desktop wrapper
+scripts/            dev/build helpers (e.g. cursor-hooks/, Windows toolchain)
 ```
+
+More build tags, CI, and dependency rules: `docs/agents/build.md` and the
+`Makefile`.
 
 ## Acknowledgements
 

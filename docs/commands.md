@@ -804,6 +804,22 @@ for setup and reporting behavior.
 
 ______________________________________________________________________
 
+### `agentsview usage cursor-hook`
+
+Import new lines from the global Cursor hook telemetry file
+(`~/.agentsview/cursor-hook-usage.jsonl` by default) into the local archive so
+they contribute to the Usage dashboard and daily reports without a Cursor Admin
+API key. Sync also runs this ingest automatically after each pass.
+
+```bash
+agentsview usage cursor-hook
+```
+
+See [Token Usage & Costs](/docs/token-usage/#cursor-admin-usage-events) for hook
+installation and how hook rows differ from Admin API billing rows.
+
+______________________________________________________________________
+
 ### `agentsview activity report`
 
 Report active time, concurrency, cost, token, breakdown, and session rows for a

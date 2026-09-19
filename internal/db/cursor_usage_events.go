@@ -29,6 +29,7 @@ type CursorUsageEvent struct {
 	UserEmail        string
 	IsHeadless       bool
 	DedupKey         string
+	SessionID        string
 }
 
 func (db *DB) ensureCursorUsageEventsSchemaLocked(w *writerHandle) error {
@@ -47,7 +48,8 @@ func (db *DB) ensureCursorUsageEventsSchemaLocked(w *writerHandle) error {
 			user_id TEXT NOT NULL DEFAULT '',
 			user_email TEXT NOT NULL DEFAULT '',
 			is_headless INTEGER NOT NULL DEFAULT 0,
-			dedup_key TEXT NOT NULL DEFAULT ''
+			dedup_key TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT ''
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_cursor_usage_events_dedup
 			ON cursor_usage_events(dedup_key)
@@ -105,14 +107,14 @@ func (db *DB) InsertCursorUsageEvents(
 				input_tokens, output_tokens,
 				cache_write_tokens, cache_read_tokens,
 				charged_microdollars, cursor_token_fee_microdollars,
-				user_id, user_email, is_headless, dedup_key
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				user_id, user_email, is_headless, dedup_key, session_id
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ev.OccurredAt, SanitizeUTF8(ev.Model), SanitizeUTF8(ev.Kind),
 			ev.InputTokens, ev.OutputTokens,
 			ev.CacheWriteTokens, ev.CacheReadTokens,
 			ev.Charged.Microdollars, ev.CursorTokenFee.Microdollars,
 			SanitizeUTF8(ev.UserID), SanitizeUTF8(ev.UserEmail),
-			isHeadless, ev.DedupKey,
+			isHeadless, ev.DedupKey, SanitizeUTF8(ev.SessionID),
 		); err != nil {
 			return fmt.Errorf("inserting cursor usage event: %w", err)
 		}
@@ -123,6 +125,37 @@ func (db *DB) InsertCursorUsageEvents(
 	}
 	db.notifyCursorUsage()
 	return nil
+}
+
+// UpdateCursorUsageEventSessionID sets session_id on hook rows matched by dedup_key.
+func (db *DB) UpdateCursorUsageEventSessionID(
+	ctx context.Context, dedupKey, sessionID string,
+) (int, error) {
+	dedupKey = strings.TrimSpace(dedupKey)
+	sessionID = SanitizeUTF8(strings.TrimSpace(sessionID))
+	if dedupKey == "" || sessionID == "" {
+		return 0, nil
+	}
+	if !db.hasCursorUsageTable() {
+		return 0, nil
+	}
+	res, err := db.getWriter().ExecContext(ctx, `
+		UPDATE cursor_usage_events
+		SET session_id = ?
+		WHERE dedup_key = ? AND kind = 'hook' AND session_id = ''`,
+		sessionID, dedupKey,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("updating cursor usage session_id: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		db.notifyCursorUsage()
+	}
+	return int(n), nil
 }
 
 // CursorUsageEventDedupKey returns the stable cross-backend identity for a
@@ -195,7 +228,7 @@ func (db *DB) GetCursorUsageEvents(
 			input_tokens, output_tokens,
 			cache_write_tokens, cache_read_tokens,
 			charged_microdollars, cursor_token_fee_microdollars,
-			user_id, user_email, is_headless, dedup_key
+			user_id, user_email, is_headless, dedup_key, session_id
 		FROM cursor_usage_events
 		WHERE id > ?
 		ORDER BY occurred_at, id`, sinceID)
@@ -214,6 +247,7 @@ func (db *DB) GetCursorUsageEvents(
 			&ev.CacheWriteTokens, &ev.CacheReadTokens,
 			&ev.Charged, &ev.CursorTokenFee,
 			&ev.UserID, &ev.UserEmail, &isHeadless, &ev.DedupKey,
+			&ev.SessionID,
 		); err != nil {
 			return nil, fmt.Errorf("scanning cursor usage event: %w", err)
 		}

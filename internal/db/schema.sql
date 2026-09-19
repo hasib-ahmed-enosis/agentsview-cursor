@@ -300,7 +300,8 @@ CREATE TABLE IF NOT EXISTS cursor_usage_events (
     user_id TEXT NOT NULL DEFAULT '',
     user_email TEXT NOT NULL DEFAULT '',
     is_headless INTEGER NOT NULL DEFAULT 0,
-    dedup_key TEXT NOT NULL DEFAULT ''
+    dedup_key TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cursor_usage_events_dedup

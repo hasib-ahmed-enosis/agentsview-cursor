@@ -1416,9 +1416,17 @@ schemas keep their existing ordering behavior.
   [cc_transcript_viewer](https://github.com/tim-hua-01/cc_transcript_viewer/blob/4157ac3575c4c0e9d742048f494be7ee10c589fc/cursor_parser.py).
 - **Usage and cost:** The consumed text/JSONL transcripts have no reliable
   per-message token, cache, reasoning, credit, or monetary-cost fields. The
-  captured store adds no priced usage fields consumed by agentsview.
+  captured store adds no priced usage fields consumed by agentsview. Optional
+  local hook telemetry appends JSONL rows to
+  `~/.agentsview/cursor-hook-usage.jsonl` (Cursor `stop` /
+  `afterAgentResponse` hooks). AgentsView ingests that file into
+  `cursor_usage_events` for the Usage dashboard (`internal/cursorhook`) and
+  reads the same file to enrich per-message session usage during parse via
+  `internal/parser/cursor_token_log.go`.
 - **Agentsview:** `internal/parser/cursor.go`,
   `internal/parser/cursor_paths.go`, and `internal/parser/cursor_provider.go`;
+  `internal/parser/cursor_token_log.go` enriches assistant messages from the
+  legacy workspace token log matched by transcript UUID and workspace root;
   workspace identity uses a filesystem-backed unique-match resolver, while
   role and attribution boundaries are reconstructed from Markdown. A
   subagent's parent link is derived from its path at parse time.
