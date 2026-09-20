@@ -85,8 +85,12 @@ testdata/ssh/test_key
 # Antigravity CLI session dir created when AGY runs inside this repo
 .antigravitycli/
 
-# graphify knowledge-graph output (local analysis)
-graphify-out/
+# graphify knowledge-graph output (committed; local cache and machine-local state excluded)
+graphify-out/cache/
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+# stale scoped graphify runs in subdirectories - only the root graphify-out/ is current
+/*/graphify-out/
 .kata.local.toml
 # roborev snapshots
 /.roborev/
