@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -279,7 +280,7 @@ func formatDuckDBPushFilters(projects []string, excludeProjects []string) string
 
 func formatDuckDBPushSessionCounts(counts duckdbsync.PushSessionCounts) string {
 	if len(counts.ByAgent) == 0 {
-		return fmt.Sprintf("%d", counts.Total)
+		return strconv.Itoa(counts.Total)
 	}
 	agents := make([]string, 0, len(counts.ByAgent))
 	for agent := range counts.ByAgent {
@@ -387,9 +388,10 @@ func runDuckDBServe(appCfg config.Config, basePath string) {
 
 	rtOpts := serveRuntimeOptions{
 		Mode:          "duckdb-serve",
+		BasePath:      basePath,
 		RequestedPort: appCfg.Port,
 	}
-	appCfg, err = prepareServeRuntimeConfig(appCfg, rtOpts)
+	appCfg, err = prepareServeRuntimeConfig(ctx, appCfg, rtOpts)
 	if err != nil {
 		fatal("duckdb serve: %v", err)
 	}
@@ -404,7 +406,7 @@ func runDuckDBServe(appCfg config.Config, basePath string) {
 		server.WithBaseContext(ctx),
 	}
 	if basePath != "" {
-		opts = append(opts, server.WithBasePath(basePath))
+		opts = append(opts, server.WithBasePath(rtOpts.BasePath))
 	}
 	srv := server.New(appCfg, store, nil, opts...)
 	rt, err := startServerWithOptionalCaddy(ctx, appCfg, srv, rtOpts)
@@ -415,7 +417,7 @@ func runDuckDBServe(appCfg config.Config, basePath string) {
 		fatal("duckdb serve: %v", err)
 	}
 	if _, sfErr := writeDaemonRuntimeWithAuth(
-		rt.Cfg.DataDir, rt.Cfg.Host, rt.Cfg.Port, version, true,
+		rt.Cfg.DataDir, rt.Cfg.Host, rt.Cfg.Port, version, rt.PublicURL, true,
 		rt.Cfg.RequireAuth,
 		rt.Caddy.Pid(),
 	); sfErr != nil {
@@ -473,7 +475,7 @@ func openDuckDBServeStore(
 	}
 
 	applyClassifierConfig(appCfg)
-	store, err := duckdbsync.NewStoreFromConfig(duckCfg)
+	store, err := duckdbsync.NewStoreFromConfig(ctx, duckCfg)
 	if err != nil {
 		fatal("duckdb serve: %v", err)
 	}
@@ -684,7 +686,7 @@ func serveQuackOnce(
 		return quackServeSession{}, fmt.Errorf("statting duckdb mirror: %w", err)
 	}
 	duckdbsync.PrimeFileIdentity(info)
-	conn, err := duckdbsync.OpenReadOnly(duckCfg.Path)
+	conn, err := duckdbsync.OpenReadOnly(ctx, duckCfg.Path)
 	if err != nil {
 		return quackServeSession{}, err
 	}
@@ -811,9 +813,7 @@ func resolveQuackServeToken(
 	if configuredToken != "" {
 		return configuredToken, nil
 	}
-	return "", fmt.Errorf(
-		"token is required; set --token, AGENTSVIEW_DUCKDB_TOKEN, or [duckdb].token",
-	)
+	return "", errors.New("token is required; set --token, AGENTSVIEW_DUCKDB_TOKEN, or [duckdb].token")
 }
 
 func identifyQuackNode(ctx context.Context, conn *sql.DB, machine string) {
@@ -864,15 +864,11 @@ func resolveDuckDBPushProjects(
 	duckCfg config.DuckDBConfig, cfg DuckDBPushConfig,
 ) (projects, exclude []string, err error) {
 	if cfg.ProjectsFlag != "" && cfg.ExcludeProjects != "" {
-		return nil, nil, fmt.Errorf(
-			"--projects and --exclude-projects are mutually exclusive",
-		)
+		return nil, nil, errors.New("--projects and --exclude-projects are mutually exclusive")
 	}
 	if cfg.AllProjects &&
 		(cfg.ProjectsFlag != "" || cfg.ExcludeProjects != "") {
-		return nil, nil, fmt.Errorf(
-			"--all-projects cannot be combined with --projects or --exclude-projects",
-		)
+		return nil, nil, errors.New("--all-projects cannot be combined with --projects or --exclude-projects")
 	}
 	projects = duckCfg.Projects
 	exclude = duckCfg.ExcludeProjects
@@ -889,9 +885,7 @@ func resolveDuckDBPushProjects(
 		projects = nil
 	}
 	if len(projects) > 0 && len(exclude) > 0 {
-		return nil, nil, fmt.Errorf(
-			"projects and exclude_projects are mutually exclusive",
-		)
+		return nil, nil, errors.New("projects and exclude_projects are mutually exclusive")
 	}
 	return projects, exclude, nil
 }

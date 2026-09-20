@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -32,8 +33,8 @@ type CursorUsageEvent struct {
 	SessionID        string
 }
 
-func (db *DB) ensureCursorUsageEventsSchemaLocked(w *writerHandle) error {
-	if _, err := w.Exec(`
+func (db *DB) ensureCursorUsageEventsSchemaLocked(ctx context.Context, w *writerHandle) error {
+	if _, err := w.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS cursor_usage_events (
 			id INTEGER PRIMARY KEY,
 			occurred_at TEXT NOT NULL,
@@ -66,7 +67,7 @@ func (db *DB) ensureCursorUsageEventsSchemaLocked(w *writerHandle) error {
 
 // InsertCursorUsageEvents appends new Cursor usage rows and ignores
 // duplicates with the same stable fingerprint.
-func (db *DB) InsertCursorUsageEvents(
+func (db *DB) InsertCursorUsageEvents(ctx context.Context,
 	events []CursorUsageEvent,
 ) error {
 	if len(events) == 0 {
@@ -76,7 +77,7 @@ func (db *DB) InsertCursorUsageEvents(
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	tx, err := db.getWriter().Begin()
+	tx, err := db.getWriter().Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning cursor usage tx: %w", err)
 	}
@@ -84,16 +85,16 @@ func (db *DB) InsertCursorUsageEvents(
 
 	for _, ev := range events {
 		if ev.Model == "" {
-			return fmt.Errorf("cursor usage event model is required")
+			return errors.New("cursor usage event model is required")
 		}
 		if ev.OccurredAt == "" {
-			return fmt.Errorf("cursor usage event timestamp is required")
+			return errors.New("cursor usage event timestamp is required")
 		}
 		if ev.DedupKey == "" {
 			ev.DedupKey = CursorUsageEventDedupKey(ev)
 		}
 		if ev.DedupKey == "" {
-			return fmt.Errorf("cursor usage event dedup key is required")
+			return errors.New("cursor usage event dedup key is required")
 		}
 
 		isHeadless := 0
@@ -101,7 +102,7 @@ func (db *DB) InsertCursorUsageEvents(
 			isHeadless = 1
 		}
 
-		if _, err := tx.Exec(`
+		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO cursor_usage_events (
 				occurred_at, model, kind,
 				input_tokens, output_tokens,
@@ -136,7 +137,7 @@ func (db *DB) UpdateCursorUsageEventSessionID(
 	if dedupKey == "" || sessionID == "" {
 		return 0, nil
 	}
-	if !db.hasCursorUsageTable() {
+	if !db.hasCursorUsageTable(ctx) {
 		return 0, nil
 	}
 	res, err := db.getWriter().ExecContext(ctx, `
@@ -220,7 +221,7 @@ func formatMicrodollarsAsLegacyCents(microdollars int64) string {
 func (db *DB) GetCursorUsageEvents(
 	ctx context.Context, sinceID int64,
 ) ([]CursorUsageEvent, error) {
-	if !db.hasCursorUsageTable() {
+	if !db.hasCursorUsageTable(ctx) {
 		return nil, nil
 	}
 	rows, err := db.getReader().QueryContext(ctx, `
@@ -260,11 +261,11 @@ func (db *DB) GetCursorUsageEvents(
 	return out, nil
 }
 
-func (db *DB) CursorUsageEventFingerprint() (string, error) {
-	if !db.hasCursorUsageTable() {
+func (db *DB) CursorUsageEventFingerprint(ctx context.Context) (string, error) {
+	if !db.hasCursorUsageTable(ctx) {
 		return "", nil
 	}
-	rows, err := db.getReader().Query(`
+	rows, err := db.getReader().Query(ctx, `
 		SELECT occurred_at, model, kind,
 			input_tokens, output_tokens,
 			cache_write_tokens, cache_read_tokens,

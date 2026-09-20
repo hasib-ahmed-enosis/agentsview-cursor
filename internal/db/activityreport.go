@@ -225,8 +225,7 @@ func (db *DB) GetSessionUsageRows(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		inputTok, outputTok, cacheCrTok, cacheRdTok, reasoningTok :=
-			sqliteSessionUsageRowTokens(o.scan)
+		inputTok, outputTok, cacheCrTok, cacheRdTok, reasoningTok := sqliteSessionUsageRowTokens(o.scan)
 		snapshotRows[i] = activity.UsageRow{
 			SessionID:           o.scan.sessionID,
 			Timestamp:           o.scan.ts,
@@ -251,13 +250,11 @@ func (db *DB) GetSessionUsageRows(
 			usageRowWebSearchRequests(o.scan.usageSource, o.scan.tokenJSON))
 		rawOutputTokensBySession[o.scan.sessionID] += outputTok
 	}
-	canonicalTokenCoverageBySession, err :=
-		activity.CanonicalSessionTokenCoverageContext(ctx, snapshotRows)
+	canonicalTokenCoverageBySession, err := activity.CanonicalSessionTokenCoverageContext(ctx, snapshotRows)
 	if err != nil {
 		return nil, err
 	}
-	snapshotMask, snapshotAttribution, snapshotWebSearchRequests, err :=
-		activity.ClaudeSnapshotSurvivorSelectionContext(ctx, snapshotRows)
+	snapshotMask, snapshotAttribution, snapshotWebSearchRequests, err := activity.ClaudeSnapshotSurvivorSelectionContext(ctx, snapshotRows)
 	if err != nil {
 		return nil, err
 	}
@@ -270,16 +267,14 @@ func (db *DB) GetSessionUsageRows(
 			return nil, err
 		}
 		if !snapshotMask[i] {
-			deduplicatedOutputTokens[o.scan.sessionID] +=
-				snapshotRows[i].OutputTokens
+			deduplicatedOutputTokens[o.scan.sessionID] += snapshotRows[i].OutputTokens
 			if rowContributes[i] {
 				discardedContributingSessions[o.scan.sessionID] = struct{}{}
 			}
 			continue
 		}
 		r := o.scan
-		inputTok, outputTok, cacheCrTok, cacheRdTok, _ :=
-			sqliteSessionUsageRowTokens(r)
+		inputTok, outputTok, cacheCrTok, cacheRdTok, _ := sqliteSessionUsageRowTokens(r)
 		attributionSessionID := snapshotAttribution[i]
 		if attributionSessionID != r.sessionID {
 			deduplicatedOutputTokens[r.sessionID] += outputTok
@@ -308,9 +303,8 @@ func (db *DB) GetSessionUsageRows(
 			costRow.cost = sql.NullInt64{}
 			rateResolver.RecordUnattributedReported()
 		}
-		cost, priced, contributes, priceErr :=
-			sessionRowCostWithWebSearchRequests(
-				costRow, snapshotWebSearchRequests[i], rateResolver)
+		cost, priced, contributes, priceErr := sessionRowCostWithWebSearchRequests(
+			costRow, snapshotWebSearchRequests[i], rateResolver)
 		if priceErr != nil {
 			return nil, priceErr
 		}
@@ -907,6 +901,7 @@ func (db *DB) activityReportCandidateSource(
 		if err != nil {
 			return fmt.Errorf("querying activity report terminal candidates: %w", err)
 		}
+		defer terminalRows.Close()
 		var terminal []activity.IntervalCandidate
 		for terminalRows.Next() {
 			candidate, scanErr := scanCandidate(terminalRows)
@@ -982,7 +977,7 @@ func (db *DB) activityReportUsageFrom(
 	lowerBound, upperBound string,
 	q activity.Query,
 ) ([]activity.UsageRow, *export.PricingBlock, error) {
-	candidates, rateResolver, err := db.loadActivityReportUsageCandidatesFrom(
+	candidates, _, rateResolver, err := db.loadActivityReportUsageCandidatesFrom(
 		ctx, source, ids, lowerBound, upperBound, false,
 	)
 	if err != nil {
@@ -997,10 +992,9 @@ func (db *DB) activityReportUsageFrom(
 			candidate.scan.usageSource, candidate.scan.tokenJSON)
 		baseRows[i] = row
 	}
-	mask, attribution, webSearchRequests :=
-		activity.UsageSurvivorSelectionForSessions(
-			q.RangeStart, q.RangeEnd, q.EffectiveEnd, baseRows, ids,
-		)
+	mask, attribution, webSearchRequests := activity.UsageSurvivorSelectionForSessions(
+		q.RangeStart, q.RangeEnd, q.EffectiveEnd, baseRows, ids,
+	)
 	return materializeActivityReportUsageCandidates(
 		candidates, mask, attribution, webSearchRequests, rateResolver,
 	)
@@ -1024,14 +1018,14 @@ func (db *DB) loadActivityReportUsageCandidatesFrom(
 	ids []string,
 	lowerBound, upperBound string,
 	restrictToIDs bool,
-) ([]activityReportUsageCandidate, *export.PricingResolver, error) {
+) ([]activityReportUsageCandidate, []export.EffectivePricingRow, *export.PricingResolver, error) {
 	pricing, err := db.loadPricingMapFrom(ctx, source)
 	if err != nil {
-		return nil, nil, fmt.Errorf("loading pricing: %w", err)
+		return nil, nil, nil, fmt.Errorf("loading pricing: %w", err)
 	}
 	rateResolver := export.NewPricingResolver(pricing)
 	if len(ids) == 0 {
-		return []activityReportUsageCandidate{}, rateResolver, nil
+		return []activityReportUsageCandidate{}, pricing, rateResolver, nil
 	}
 
 	var candidates []activityReportUsageCandidate
@@ -1103,10 +1097,10 @@ func (db *DB) loadActivityReportUsageCandidatesFrom(
 		return loadRows(rowsSQL, args, nil)
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if restrictToIDs {
-		return candidates, rateResolver, nil
+		return candidates, pricing, rateResolver, nil
 	}
 
 	type snapshotKey struct {
@@ -1144,7 +1138,7 @@ func (db *DB) loadActivityReportUsageCandidatesFrom(
 		}
 		encodedPairs, marshalErr := json.Marshal(pairs)
 		if marshalErr != nil {
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"encoding activity report Claude snapshot keys: %w", marshalErr)
 		}
 		rowsSQL := dailyUsageRowsSQLWithWhere(
@@ -1157,10 +1151,10 @@ func (db *DB) loadActivityReportUsageCandidatesFrom(
 				)`,
 			usageEventEligibility+" AND 1 = 0")
 		if err := loadRows(rowsSQL, []any{string(encodedPairs)}, candidateIDs); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	return candidates, rateResolver, nil
+	return candidates, pricing, rateResolver, nil
 }
 
 func sortActivityReportUsageCandidates(
@@ -1190,31 +1184,6 @@ func sortActivityReportUsageCandidates(
 	})
 }
 
-// activityReportUsageCandidatesFrom returns normalized padded-range rows
-// without sorting or applying a survivor mask. Reporting export merges these
-// rows with standalone candidates before imposing either operation.
-func (db *DB) activityReportUsageCandidatesFrom(
-	ctx context.Context,
-	source sessionExportQuerier,
-	ids []string,
-	lowerBound, upperBound string,
-	includeWebSearch bool,
-) ([]activity.UsageRow, *export.PricingBlock, error) {
-	candidates, rateResolver, err := db.loadActivityReportUsageCandidatesFrom(
-		ctx, source, ids, lowerBound, upperBound, true,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	var webSearchRequests []int
-	if !includeWebSearch {
-		webSearchRequests = make([]int, len(candidates))
-	}
-	return materializeActivityReportUsageCandidates(
-		candidates, nil, nil, webSearchRequests, rateResolver,
-	)
-}
-
 func materializeActivityReportUsageCandidates(
 	candidates []activityReportUsageCandidate,
 	mask []bool,
@@ -1227,8 +1196,7 @@ func materializeActivityReportUsageCandidates(
 		if mask != nil && !mask[i] {
 			continue
 		}
-		inputTok, outputTok, cacheCrTok, cacheRdTok, _ :=
-			dailyUsageRowTokens(candidate.scan)
+		inputTok, outputTok, cacheCrTok, cacheRdTok, _ := dailyUsageRowTokens(candidate.scan)
 		costRow := candidate.scan
 		var sessionCost *money.Money
 		if candidate.scan.costSource == CopilotReportedCostSource &&
@@ -1243,9 +1211,8 @@ func materializeActivityReportUsageCandidates(
 		if webSearchRequests != nil {
 			webSearches = webSearchRequests[i]
 		}
-		cost, priced, contributes, priceErr :=
-			sqliteActivityReportRowStatusWithWebSearchRequests(
-				costRow, webSearches, rateResolver)
+		cost, priced, contributes, priceErr := sqliteActivityReportRowStatusWithWebSearchRequests(
+			costRow, webSearches, rateResolver)
 		if priceErr != nil {
 			return nil, nil, priceErr
 		}
@@ -1334,8 +1301,7 @@ func sqliteActivityReportRowStatusWithWebSearchRequests(
 	var inTok, outTok, crTok, cr1hTok, rdTok int
 	reasoningTok := r.reasoningTokens
 	if r.usageSource == "message" {
-		inTok, outTok, crTok, rdTok, reasoningTok =
-			clampedUsageTokenCountersWithReasoning(r.tokenJSON)
+		inTok, outTok, crTok, rdTok, reasoningTok = clampedUsageTokenCountersWithReasoning(r.tokenJSON)
 		cr1hTok = clampedCacheCreation1hTokens(r.tokenJSON)
 	} else {
 		inTok, outTok, crTok, rdTok = usageEventRowTokens(

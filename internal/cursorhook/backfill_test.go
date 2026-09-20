@@ -21,11 +21,10 @@ func TestBackfillSessionIDsSetsSessionIDOnExistingRows(t *testing.T) {
 		`"input_tokens":10,"output_tokens":5}` + "\n"
 	require.NoError(t, os.WriteFile(logPath, []byte(line), 0o644))
 
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
-
-	ctx := context.Background()
 
 	// Simulate a pre-migration row that was inserted without a session_id.
 	row := UsageRow{
@@ -42,7 +41,7 @@ func TestBackfillSessionIDsSetsSessionIDOnExistingRows(t *testing.T) {
 	ev, ok := row.CursorUsageEvent()
 	require.True(t, ok)
 	ev.SessionID = ""
-	require.NoError(t, d.InsertCursorUsageEvents([]db.CursorUsageEvent{ev}))
+	require.NoError(t, d.InsertCursorUsageEvents(ctx, []db.CursorUsageEvent{ev}))
 
 	events, err := d.GetCursorUsageEvents(ctx, 0)
 	require.NoError(t, err)
@@ -66,7 +65,7 @@ func TestBackfillSessionIDsSetsSessionIDOnExistingRows(t *testing.T) {
 
 func TestBackfillSessionIDsNoLogFile(t *testing.T) {
 	dataDir := t.TempDir()
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
 

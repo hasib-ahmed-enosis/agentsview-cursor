@@ -55,7 +55,7 @@ func Ingest(ctx context.Context, database *db.DB, dataDir string) (int, error) {
 		events = append(events, ev)
 	}
 	if len(events) > 0 {
-		if err := database.InsertCursorUsageEvents(events); err != nil {
+		if err := database.InsertCursorUsageEvents(ctx, events); err != nil {
 			return 0, err
 		}
 	}

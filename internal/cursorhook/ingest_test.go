@@ -18,11 +18,10 @@ func TestIngestAppendsRows(t *testing.T) {
 	line := `{"recorded_at":"2026-09-15T12:00:00Z","hook_event_name":"afterAgentResponse","conversation_id":"sess","generation_id":"g1","model":"m1","input_tokens":10,"output_tokens":5}` + "\n"
 	require.NoError(t, os.WriteFile(logPath, []byte(line), 0o644))
 
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	ctx := context.Background()
+	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
-
-	ctx := context.Background()
 
 	count, err := Ingest(ctx, d, dataDir)
 	require.NoError(t, err)
@@ -45,7 +44,7 @@ func TestIngestSkipsBOMPrefixedFirstLine(t *testing.T) {
 	line := `{"recorded_at":"2026-09-15T12:00:00Z","hook_event_name":"afterAgentResponse","conversation_id":"sess","generation_id":"g1","model":"m1","input_tokens":10,"output_tokens":5}` + "\n"
 	require.NoError(t, os.WriteFile(logPath, append([]byte{0xef, 0xbb, 0xbf}, []byte(line)...), 0o644))
 
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
 

@@ -20,6 +20,7 @@ var providerMigrationModes = map[AgentType]ProviderMigrationMode{
 	AgentCowork:         ProviderMigrationProviderAuthoritative,
 	AgentCodex:          ProviderMigrationProviderAuthoritative,
 	AgentTraeX:          ProviderMigrationProviderAuthoritative,
+	AgentAugureCode:     ProviderMigrationProviderAuthoritative,
 	AgentCopilot:        ProviderMigrationProviderAuthoritative,
 	AgentGemini:         ProviderMigrationProviderAuthoritative,
 	AgentGeminiApps:     ProviderMigrationImportOnly,
@@ -58,6 +59,7 @@ var providerMigrationModes = map[AgentType]ProviderMigrationMode{
 	AgentGrok:           ProviderMigrationProviderAuthoritative,
 	AgentGoose:          ProviderMigrationProviderAuthoritative,
 	AgentWorkBuddy:      ProviderMigrationProviderAuthoritative,
+	AgentCodeBuddy:      ProviderMigrationProviderAuthoritative,
 	AgentForge:          ProviderMigrationProviderAuthoritative,
 	AgentDevin:          ProviderMigrationProviderAuthoritative,
 	AgentPiebald:        ProviderMigrationProviderAuthoritative,
@@ -78,9 +80,11 @@ var providerMigrationModes = map[AgentType]ProviderMigrationMode{
 	AgentEvener:         ProviderMigrationProviderAuthoritative,
 	AgentReasonix:       ProviderMigrationProviderAuthoritative,
 	AgentRooCode:        ProviderMigrationProviderAuthoritative,
+	AgentCline:          ProviderMigrationProviderAuthoritative,
 	AgentPoolside:       ProviderMigrationProviderAuthoritative,
 	AgentOmnigent:       ProviderMigrationProviderAuthoritative,
 	AgentCodebuff:       ProviderMigrationProviderAuthoritative,
+	AgentCrush:          ProviderMigrationProviderAuthoritative,
 
 	AgentDeepSeekHarness: ProviderMigrationProviderAuthoritative,
 }

@@ -19,6 +19,7 @@ const (
 	AgentCowork         AgentType = "cowork"
 	AgentCodex          AgentType = "codex"
 	AgentTraeX          AgentType = "traex"
+	AgentAugureCode     AgentType = "augure-code"
 	AgentCopilot        AgentType = "copilot"
 	AgentGemini         AgentType = "gemini"
 	AgentGeminiApps     AgentType = "gemini-apps"
@@ -57,6 +58,7 @@ const (
 	AgentGrok           AgentType = "grok"
 	AgentGoose          AgentType = "goose"
 	AgentWorkBuddy      AgentType = "workbuddy"
+	AgentCodeBuddy      AgentType = "codebuddy"
 	AgentForge          AgentType = "forge"
 	AgentDevin          AgentType = "devin"
 	AgentPiebald        AgentType = "piebald"
@@ -77,10 +79,12 @@ const (
 	AgentEvener         AgentType = "evener"
 	AgentIcodemate      AgentType = "icodemate"
 	AgentRooCode        AgentType = "roocode"
+	AgentCline          AgentType = "cline"
 	AgentPoolside       AgentType = "poolside"
 	AgentOmnigent       AgentType = "omnigent"
 	AgentCodebuff       AgentType = "codebuff"
 	AgentFreebuff       AgentType = "freebuff"
+	AgentCrush          AgentType = "crush"
 )
 
 const AgentDeepSeekHarness AgentType = "deepseek-harness"
@@ -215,6 +219,25 @@ var Registry = []AgentDef{
 		// session_index.jsonl, which TraeX never writes. Watching
 		// ~/.trae/cli shallowly would deliver nothing but churn from the
 		// SQLite WALs TRAE CLI keeps there.
+	},
+	{
+		// Augure Code (augureai.ca) is a closed-source rebrand of codex-rs,
+		// byte-compatible with Codex rollout JSONL, so it reuses the Codex
+		// parser through a relabel hook like TraeX. Sessions live under a
+		// dated YYYY/MM/DD tree at ~/.augure/sessions. Distinct agent because
+		// resuming needs `augure resume` and the rollout UUIDs are a separate
+		// namespace from Codex's.
+		Type:               AgentAugureCode,
+		DisplayName:        "Augure Code",
+		EnvVar:             "AUGURE_CODE_SESSIONS_DIR",
+		ConfigKey:          "augure_code_sessions_dirs",
+		DefaultDirs:        []string{".augure/sessions"},
+		IDPrefix:           "augure-code:",
+		FileBased:          true,
+		PostAnswerToolWork: true,
+		// No ShallowWatchRootsFunc: that hook exists for Codex's sibling
+		// session_index.jsonl, which Augure does not write (verified: none
+		// exists under ~/.augure).
 	},
 	{
 		Type:         AgentCopilot,
@@ -725,6 +748,15 @@ var Registry = []AgentDef{
 		FileBased:   true,
 	},
 	{
+		Type:        AgentCodeBuddy,
+		DisplayName: "CodeBuddy",
+		EnvVar:      "CODEBUDDY_DIR",
+		ConfigKey:   "codebuddy_dirs",
+		DefaultDirs: codebuddyDefaultDirs(),
+		IDPrefix:    "codebuddy:",
+		FileBased:   true,
+	},
+	{
 		Type:        AgentForge,
 		DisplayName: "Forge",
 		EnvVar:      "FORGE_DIR",
@@ -977,6 +1009,17 @@ var Registry = []AgentDef{
 		FileBased: true,
 	},
 	{
+		// Cline CLI stores sessions under ~/.cline/data/sessions/<id>/
+		// with <id>.json (metadata) and <id>.messages.json (transcript).
+		Type:        AgentCline,
+		DisplayName: "Cline",
+		EnvVar:      "CLINE_DIR",
+		ConfigKey:   "cline_dirs",
+		DefaultDirs: []string{".cline"},
+		IDPrefix:    "cline:",
+		FileBased:   true,
+	},
+	{
 		Type:        AgentPoolside,
 		DisplayName: "Poolside",
 		EnvVar:      "POOLSIDE_DIR",
@@ -1033,6 +1076,26 @@ var Registry = []AgentDef{
 		Usage: UsageCapabilities{
 			NoPerMessageTokenData: true,
 		},
+	},
+	{
+		// Charm Crush keeps one SQLite store per project at
+		// <project>/.crush/crush.db and records the project list in
+		// ~/.local/share/crush/projects.json; the provider expands that
+		// registry into roots at configuration time.
+		Type:        AgentCrush,
+		DisplayName: "Charm Crush",
+		EnvVar:      "CRUSH_DIR",
+		ConfigKey:   "crush_dirs",
+		DefaultDirs: crushDefaultDirs(),
+		IDPrefix:    "crush:",
+		FileBased:   false,
+		Usage: UsageCapabilities{
+			NoPerMessageTokenData: true,
+		},
+		// Session rows live in a WAL-mode SQLite store whose change
+		// events are not authoritative; periodic reconcile covers
+		// registry and schema churn.
+		PeriodicReconcile: true,
 	},
 }
 
@@ -1114,8 +1177,9 @@ func AgentIsCopilot(t AgentType) bool {
 	switch t {
 	case AgentCopilot, AgentVSCodeCopilot, AgentVSCopilot:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // AgentNameIsCopilot reports whether the agent name identifies a
@@ -1219,6 +1283,10 @@ const (
 // SessionKindNonInteractive marks a provider session whose durable metadata
 // identifies a non-interactive invocation.
 const SessionKindNonInteractive = "non-interactive"
+
+// SessionKindRoborev marks a Codex session whose session_meta thread_source
+// is the roborev feature tag (`codex exec --thread-source roborev`).
+const SessionKindRoborev = "roborev"
 
 // FileInfo holds file system metadata for a session source file.
 type FileInfo struct {
@@ -1517,8 +1585,7 @@ func applyUsageEventTokenTotals(
 	sess *ParsedSession,
 	events []ParsedUsageEvent,
 ) {
-	totalOutput, hasOutput, peakContext, hasContext :=
-		UsageEventTokenAggregate(events)
+	totalOutput, hasOutput, peakContext, hasContext := UsageEventTokenAggregate(events)
 	if hasOutput {
 		sess.HasTotalOutputTokens = true
 		sess.TotalOutputTokens = totalOutput

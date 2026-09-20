@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/agentsview/internal/apiclient"
 	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/postgres"
 )
@@ -74,18 +74,22 @@ func TestArchiveWriteBackendPGPushPostsToDaemon(t *testing.T) {
 		r *http.Request,
 	) {
 		gotAuth = r.Header.Get("Authorization")
-		var req daemonPushRequest
-		require.NoError(t, json.UnmarshalRead(r.Body, &req))
+		var req apiclient.DaemonPushRequest
+		if !assert.NoError(t, json.UnmarshalRead(r.Body, &req)) {
+			return
+		}
 		assert.True(t, req.Full)
 		assert.Equal(t, []string{"a"}, req.Projects)
 		assert.Equal(t, []string{"b"}, req.ExcludeProjects)
-		require.NotNil(t, req.PG)
-		assert.Equal(t, "postgres://user:pass@host/db", req.PG.URL)
-		assert.Equal(t, "mirror", req.PG.Schema)
-		assert.Equal(t, "laptop", req.PG.MachineName)
-		assert.True(t, req.PG.AllowInsecure)
-		assert.Equal(t, "work", req.SyncStateTarget)
-		assert.True(t, req.MigrateLegacySyncState)
+		if !assert.NotNil(t, req.Pg) {
+			return
+		}
+		assert.Equal(t, "postgres://user:pass@host/db", req.Pg.URL)
+		assert.Equal(t, "mirror", req.Pg.Schema)
+		assert.Equal(t, "laptop", req.Pg.MachineName)
+		assert.True(t, req.Pg.AllowInsecure)
+		assert.Equal(t, new("work"), req.SyncStateTarget)
+		assert.Equal(t, new(true), req.MigrateLegacySyncState)
 		writeTestJSON(t, w, postgres.PushResult{
 			SessionsPushed: 2,
 			MessagesPushed: 3,
@@ -97,7 +101,7 @@ func TestArchiveWriteBackendPGPushPostsToDaemon(t *testing.T) {
 		config.Config{AuthToken: "secret"}, ts.URL,
 	)
 	result, err := backend.PGPush(
-		context.Background(),
+		t.Context(),
 		pgTargetSelection{
 			PG: config.PGConfig{
 				URL:           "postgres://user:pass@host/db",
@@ -131,7 +135,7 @@ func TestResolveArchiveWriteBackendSkipsReadOnlyDaemon(t *testing.T) {
 	registerTestRuntime(t, dataDir, ts.URL, true)
 
 	backend, cleanup, err := resolveArchiveWriteBackend(
-		context.Background(),
+		t.Context(),
 		config.Config{
 			DataDir: dataDir,
 			DBPath:  filepath.Join(dataDir, "sessions.db"),
@@ -145,7 +149,7 @@ func TestResolveArchiveWriteBackendSkipsReadOnlyDaemon(t *testing.T) {
 
 func TestArchiveWriteBackendPGPushWatchReResolvesDaemon(t *testing.T) {
 	dataDir := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	var startupPushes int
 	startup := pushRuntimeServer(t, "/api/v1/push/pg", func(
 		w http.ResponseWriter,
@@ -244,7 +248,7 @@ func TestPGPusherScopesChangeVectorPushes(t *testing.T) {
 	}}
 	pusher, _ := newTestPgPusher(target)
 	pusher.vectorReconcileNeeded = true
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.NoError(t, pusher.push(ctx, reasonStartup, false))
 	require.NoError(t, pusher.push(ctx, reasonChange, false))
@@ -278,7 +282,7 @@ func TestPGPusherZeroGenerationKeepsReconcile(t *testing.T) {
 	target := &fakeTarget{}
 	pusher, _ := newTestPgPusher(target)
 	pusher.vectorReconcileNeeded = true
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.NoError(t, pusher.push(ctx, reasonStartup, false))
 	require.NoError(t, pusher.push(ctx, reasonChange, false))
@@ -302,11 +306,11 @@ func TestPGPusherZeroGenerationKeepsReconcile(t *testing.T) {
 // TestPGPusherPushErrorForcesReconcile pins that any push error sends the
 // next push back to a generation-wide vector reconciliation.
 func TestPGPusherPushErrorForcesReconcile(t *testing.T) {
-	failing := &fakeTarget{pushErr: fmt.Errorf("boom")}
+	failing := &fakeTarget{pushErr: errors.New("boom")}
 	recovered := &fakeTarget{}
 	pusher, _ := newTestPgPusher(failing, recovered)
 	pusher.vectorReconcileNeeded = false
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.Error(t, pusher.push(ctx, reasonChange, false))
 	require.NoError(t, pusher.push(ctx, reasonChange, false))
@@ -326,7 +330,7 @@ func TestPGPusherThreadsGenerationID(t *testing.T) {
 	target := &fakeTarget{}
 	pusher, _ := newTestPgPusher(target)
 	pusher.vectorReconcileNeeded = true
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Startup reconciles generation id 1 generation-wide.
 	target.pushResult = postgres.PushResult{
@@ -384,7 +388,7 @@ func TestPGPusherEnsuresPricingAfterLocalSyncBeforeConnect(t *testing.T) {
 	}
 
 	require.NoError(t, pusher.push(
-		context.Background(), reasonChange, false,
+		t.Context(), reasonChange, false,
 	))
 	assert.Equal(t, []string{
 		"local sync", "pricing ensure", "connect", "push",
@@ -402,7 +406,7 @@ func TestPGPusherPricingFailureWarnsAndContinues(t *testing.T) {
 	}
 
 	require.NoError(t, pusher.push(
-		context.Background(), reasonChange, false,
+		t.Context(), reasonChange, false,
 	))
 	assert.Equal(t, 1, target.pushes)
 	assert.Contains(t, logs.String(), "pricing refresh failed")
@@ -410,7 +414,7 @@ func TestPGPusherPricingFailureWarnsAndContinues(t *testing.T) {
 }
 
 func TestPGPusherCanceledPricingStopsBeforeConnect(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	connectCalled := false
 	pusher := &pgPusher{
 		localSync: func(context.Context) error { return nil },
@@ -427,7 +431,7 @@ func TestPGPusherCanceledPricingStopsBeforeConnect(t *testing.T) {
 
 	err := pusher.push(ctx, reasonChange, false)
 
-	assert.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, connectCalled)
 }
 
@@ -435,18 +439,19 @@ func TestPGPusherCanceledPricingStopsBeforeConnect(t *testing.T) {
 // the target and the next push dials a fresh connection that succeeds.
 func requireReconnectAfterTargetError(t *testing.T, first *fakeTarget) {
 	t.Helper()
+
 	p, rec := newTestPgPusher(first, &fakeTarget{})
-	require.Error(t, p.push(context.Background(), reasonChange, false))
+	require.Error(t, p.push(t.Context(), reasonChange, false))
 	require.Equal(t, 1, first.closed, "errored target should have been closed")
-	require.NoError(t, p.push(context.Background(), reasonChange, false))
+	require.NoError(t, p.push(t.Context(), reasonChange, false))
 	require.Equal(t, 2, rec.connects, "should reconnect after error")
 }
 
 func TestPgPusher_ConnectsOnceAndReuses(t *testing.T) {
 	target := &fakeTarget{}
 	p, rec := newTestPgPusher(target)
-	require.NoError(t, p.push(context.Background(), reasonChange, false))
-	require.NoError(t, p.push(context.Background(), reasonChange, false))
+	require.NoError(t, p.push(t.Context(), reasonChange, false))
+	require.NoError(t, p.push(t.Context(), reasonChange, false))
 	assert.Equal(t, 1, rec.connects, "connection should be reused")
 	assert.Equal(t, 2, target.pushes)
 }
@@ -466,7 +471,7 @@ func TestPgPusher_ConnectErrorSurfaced(t *testing.T) {
 			return nil, errors.New("dial timeout")
 		},
 	}
-	require.Error(t, p.push(context.Background(), reasonChange, false))
+	require.Error(t, p.push(t.Context(), reasonChange, false))
 }
 
 func TestPgPusher_LocalSyncErrorSkipsConnect(t *testing.T) {
@@ -478,7 +483,7 @@ func TestPgPusher_LocalSyncErrorSkipsConnect(t *testing.T) {
 			return &fakeTarget{}, nil
 		},
 	}
-	require.Error(t, p.push(context.Background(), reasonChange, false))
+	require.Error(t, p.push(t.Context(), reasonChange, false))
 	assert.Equal(t, 0, connects, "connect should not run when local sync fails")
 }
 
@@ -493,7 +498,7 @@ func TestPgPusher_LogsPartialPushErrors(t *testing.T) {
 	logs := captureLogOutput(t)
 
 	p, _ := newTestPgPusher(target)
-	require.Error(t, p.push(context.Background(), reasonChange, false),
+	require.Error(t, p.push(t.Context(), reasonChange, false),
 		"partial pushes must remain pending for retry")
 
 	got := logs.String()
@@ -513,7 +518,7 @@ func TestPgPusher_LogsSkippedConflicts(t *testing.T) {
 	logs := captureLogOutput(t)
 
 	p, _ := newTestPgPusher(target)
-	require.NoError(t, p.push(context.Background(), reasonChange, false))
+	require.NoError(t, p.push(t.Context(), reasonChange, false))
 
 	got := logs.String()
 	assert.Contains(t, got,
@@ -626,14 +631,13 @@ func TestResolvePGTargetConfig_IgnoresBrokenUnselectedTarget(t *testing.T) {
 func restoreUnsetEnv(t *testing.T, name string) {
 	t.Helper()
 	oldValue, hadValue := os.LookupEnv(name)
+	if hadValue {
+		t.Setenv(name, oldValue)
+	} else {
+		t.Setenv(name, "")
+		t.Cleanup(func() { _ = os.Unsetenv(name) })
+	}
 	require.NoError(t, os.Unsetenv(name))
-	t.Cleanup(func() {
-		if hadValue {
-			require.NoError(t, os.Setenv(name, oldValue))
-			return
-		}
-		require.NoError(t, os.Unsetenv(name))
-	})
 }
 
 func TestResolvePGTargetSelections_RejectsLegacyNamedLookup(t *testing.T) {

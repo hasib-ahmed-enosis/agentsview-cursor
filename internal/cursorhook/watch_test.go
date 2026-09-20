@@ -18,7 +18,7 @@ func TestStartUsageLogWatcherIngestsOnWrite(t *testing.T) {
 	logPath := UsageLogPath(dataDir)
 	require.NoError(t, os.WriteFile(logPath, nil, 0o644))
 
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
 
@@ -45,7 +45,7 @@ func TestStartUsageLogWatcherNoopWithoutDatabase(t *testing.T) {
 }
 
 func TestStartUsageLogWatcherNoopWithNonPositiveDebounce(t *testing.T) {
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
 

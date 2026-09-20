@@ -347,14 +347,14 @@ var usageLocationCache sync.Map
 
 func (f UsageFilter) location() *time.Location {
 	if f.Timezone == "" {
-		return time.Local
+		return time.Local //nolint:forbidigo // Usage reports group UTC timestamps into local calendar dates when no timezone is selected.
 	}
 	if cached, ok := usageLocationCache.Load(f.Timezone); ok {
 		return cached.(*time.Location)
 	}
 	loc, err := time.LoadLocation(f.Timezone)
 	if err != nil {
-		return time.Local
+		return time.Local //nolint:forbidigo // Usage reports group UTC timestamps into local calendar dates when no timezone is selected.
 	}
 	actual, _ := usageLocationCache.LoadOrStore(f.Timezone, loc)
 	return actual.(*time.Location)
@@ -1014,44 +1014,38 @@ func usageBoundedRowsSQL(
 		"\n\tAND m.timestamp IS NOT NULL" +
 		"\n\tAND m.timestamp != ''"
 	var messageTimestampArgs []any
-	messageTimestampSourceWhere, messageTimestampArgs =
-		f.appendUsageSourceFilterClauses(
-			messageTimestampSourceWhere, messageTimestampArgs, "m.model")
+	messageTimestampSourceWhere, messageTimestampArgs = f.appendUsageSourceFilterClauses(
+		messageTimestampSourceWhere, messageTimestampArgs, "m.model")
 	messageTimestampSourceWhere, messageTimestampArgs = appendUsageColumnBounds(
 		messageTimestampSourceWhere, "m.timestamp", b, messageTimestampArgs)
 	var messageTimestampJoinArgs []any
-	messageTimestampJoinWhere, messageTimestampJoinArgs :=
-		f.appendUsageSessionFilterClauses(
-			usageSessionEligibility, messageTimestampJoinArgs)
+	messageTimestampJoinWhere, messageTimestampJoinArgs := f.appendUsageSessionFilterClauses(
+		usageSessionEligibility, messageTimestampJoinArgs)
 
 	eventTimestampSourceWhere := usageEventSourceEligibility +
 		"\n\tAND ue.occurred_at IS NOT NULL"
 	var eventTimestampArgs []any
-	eventTimestampSourceWhere, eventTimestampArgs =
-		f.appendUsageSourceFilterClauses(
-			eventTimestampSourceWhere, eventTimestampArgs, "ue.model")
+	eventTimestampSourceWhere, eventTimestampArgs = f.appendUsageSourceFilterClauses(
+		eventTimestampSourceWhere, eventTimestampArgs, "ue.model")
 	eventTimestampSourceWhere, eventTimestampArgs = appendUsageColumnBounds(
 		eventTimestampSourceWhere, "ue.occurred_at", b, eventTimestampArgs)
 	var eventTimestampJoinArgs []any
-	eventTimestampJoinWhere, eventTimestampJoinArgs :=
-		f.appendUsageSessionFilterClauses(
-			usageSessionEligibility, eventTimestampJoinArgs)
+	eventTimestampJoinWhere, eventTimestampJoinArgs := f.appendUsageSessionFilterClauses(
+		usageSessionEligibility, eventTimestampJoinArgs)
 
 	messageFallbackWhere := messageEligibility +
 		"\n\tAND NULLIF(m.timestamp, '') IS NULL"
 	var messageFallbackArgs []any
-	messageFallbackWhere, messageFallbackArgs =
-		f.appendUsageBranchFilterClauses(
-			messageFallbackWhere, messageFallbackArgs, "m.model")
+	messageFallbackWhere, messageFallbackArgs = f.appendUsageBranchFilterClauses(
+		messageFallbackWhere, messageFallbackArgs, "m.model")
 	messageFallbackWhere, messageFallbackArgs = appendUsageColumnBounds(
 		messageFallbackWhere, "s.started_at", b, messageFallbackArgs)
 
 	eventFallbackWhere := usageEventEligibility +
 		"\n\tAND ue.occurred_at IS NULL"
 	var eventFallbackArgs []any
-	eventFallbackWhere, eventFallbackArgs =
-		f.appendUsageBranchFilterClauses(
-			eventFallbackWhere, eventFallbackArgs, "ue.model")
+	eventFallbackWhere, eventFallbackArgs = f.appendUsageBranchFilterClauses(
+		eventFallbackWhere, eventFallbackArgs, "ue.model")
 	eventFallbackWhere, eventFallbackArgs = appendUsageColumnBounds(
 		eventFallbackWhere, "s.started_at", b, eventFallbackArgs)
 
@@ -1619,8 +1613,7 @@ func floorNegativeTokens(v int) int {
 func clampedUsageTokenCounters(
 	tokenJSON string,
 ) (inputTok, outputTok, cacheCrTok, cacheRdTok int) {
-	inputTok, outputTok, cacheCrTok, cacheRdTok, _ =
-		parseUsageTokenCountersWithReasoning(tokenJSON)
+	inputTok, outputTok, cacheCrTok, cacheRdTok, _ = parseUsageTokenCountersWithReasoning(tokenJSON)
 	return ClampPlausibleTokens(int64(inputTok)),
 		ClampPlausibleTokens(int64(outputTok)),
 		ClampPlausibleTokens(int64(cacheCrTok)),
@@ -1630,8 +1623,7 @@ func clampedUsageTokenCounters(
 func clampedUsageTokenCountersWithReasoning(
 	tokenJSON string,
 ) (inputTok, outputTok, cacheCrTok, cacheRdTok, reasoningTok int) {
-	inputTok, outputTok, cacheCrTok, cacheRdTok, reasoningTok =
-		parseUsageTokenCountersWithReasoning(tokenJSON)
+	inputTok, outputTok, cacheCrTok, cacheRdTok, reasoningTok = parseUsageTokenCountersWithReasoning(tokenJSON)
 	return ClampPlausibleTokens(int64(inputTok)),
 		ClampPlausibleTokens(int64(outputTok)),
 		ClampPlausibleTokens(int64(cacheCrTok)),
@@ -1969,10 +1961,8 @@ func SanitizeDailyUsageProjectLabelsWithCatalog(
 	for i := range result.Daily {
 		for j := range result.Daily[i].ProjectBreakdowns {
 			raw := result.Daily[i].ProjectBreakdowns[j].Project
-			result.Daily[i].ProjectBreakdowns[j].ProjectKey =
-				export.ProjectKeyForEntry(projects[raw])
-			result.Daily[i].ProjectBreakdowns[j].Project =
-				export.SafeProjectDisplayLabel(raw)
+			result.Daily[i].ProjectBreakdowns[j].ProjectKey = export.ProjectKeyForEntry(projects[raw])
+			result.Daily[i].ProjectBreakdowns[j].Project = export.SafeProjectDisplayLabel(raw)
 		}
 	}
 	if result.SessionCounts.ByProject != nil {
@@ -2248,7 +2238,7 @@ func (db *DB) getDailyUsageLegacy(
 	// date filtering happens post-query via localDate.
 	bounds := usageBoundsForFilter(f)
 	query, rowsArgs := dailyUsageRowsSQLForBounds(
-		f, bounds, db.hasCursorUsageTable())
+		f, bounds, db.hasCursorUsageTable(ctx))
 	query, args := snapshotRankedDailyUsageRowsSQL(query, rowsArgs, f, bounds)
 	query = dailyUsageRowSelectFromSnapshotRowsWithMachine(
 		query, f.Breakdowns)
@@ -2331,8 +2321,7 @@ func (db *DB) getDailyUsageLegacy(
 			projectLabels[r.project] = struct{}{}
 		}
 
-		inputTok, outputTok, cacheCrTok, cacheRdTok, cost, savings, priceErr :=
-			dailyUsageAmounts(r, rateResolver)
+		inputTok, outputTok, cacheCrTok, cacheRdTok, cost, savings, priceErr := dailyUsageAmounts(r, rateResolver)
 		if priceErr != nil {
 			return DailyUsageResult{}, priceErr
 		}
@@ -2966,8 +2955,7 @@ func (db *DB) getTopSessionsByCostLegacy(
 			seen[key] = struct{}{}
 		}
 
-		inputTok, outputTok, cacheCrTok, cacheRdTok, cost, _, priceErr :=
-			dailyUsageAmounts(r, rateResolver)
+		inputTok, outputTok, cacheCrTok, cacheRdTok, cost, _, priceErr := dailyUsageAmounts(r, rateResolver)
 		if priceErr != nil {
 			return nil, priceErr
 		}
@@ -3147,8 +3135,7 @@ func sessionRowCostWithWebSearchRequests(
 	var inTok, outTok, crTok, cr1hTok, rdTok int
 	reasoningTok := r.reasoningTokens
 	if r.usageSource == "message" {
-		inTok, outTok, crTok, rdTok, reasoningTok =
-			clampedUsageTokenCountersWithReasoning(r.tokenJSON)
+		inTok, outTok, crTok, rdTok, reasoningTok = clampedUsageTokenCountersWithReasoning(r.tokenJSON)
 		cr1hTok = clampedCacheCreation1hTokens(r.tokenJSON)
 	} else {
 		inTok, outTok, crTok, rdTok = usageEventRowTokens(
@@ -3218,8 +3205,7 @@ func sessionUsageBreakdownEntryWithWebSearchRequests(
 ) SessionUsageBreakdownEntry {
 	var inTok, outTok, crTok, rdTok int
 	if r.usageSource == "message" {
-		inTok, outTok, crTok, rdTok =
-			clampedUsageTokenCounters(r.tokenJSON)
+		inTok, outTok, crTok, rdTok = clampedUsageTokenCounters(r.tokenJSON)
 	} else {
 		inTok, outTok, crTok, rdTok = usageEventRowTokens(
 			r.usageSource,
@@ -3342,8 +3328,7 @@ func (db *DB) getSessionUsageLegacy(
 			ClaudeRequestID: r.claudeRequestID,
 		}
 	}
-	snapshotMask, _, snapshotWebSearchRequests, err :=
-		activity.ClaudeSnapshotSurvivorSelectionContext(ctx, snapshotRows)
+	snapshotMask, _, snapshotWebSearchRequests, err := activity.ClaudeSnapshotSurvivorSelectionContext(ctx, snapshotRows)
 	if err != nil {
 		return nil, err
 	}
