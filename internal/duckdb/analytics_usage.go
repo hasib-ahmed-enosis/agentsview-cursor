@@ -3013,6 +3013,13 @@ func (s *Store) loadPricingResolver(
 	return export.NewPricingResolver(append(rows, genAI)), nil
 }
 
+// LoadPricingResolver implements Store.LoadPricingResolver for the DuckDB
+// backend, delegating to the existing resolver builder used by this
+// backend's own usage rollup paths.
+func (s *Store) LoadPricingResolver(ctx context.Context) (*export.PricingResolver, error) {
+	return s.loadPricingResolver(ctx)
+}
+
 func duckCustomPricingSource() export.PricingRowSource {
 	return export.PricingRowSourceCustom
 }
@@ -4740,9 +4747,27 @@ func (s *Store) GetTopSessionsByCost(
 		}
 		out = append(out, a.row)
 	}
-	return db.SortAndLimitTopSessions(
+	out = db.SortAndLimitTopSessions(
 		out, limit, f.TopSessionsSort, f.TopSessionsTokenTypes,
-	), nil
+	)
+	sessionIDs := make([]string, len(out))
+	for i := range out {
+		sessionIDs[i] = out[i].SessionID
+	}
+	parentInfo, err := db.LoadSessionParentInfo(ctx, sessionIDs, s.queryContext)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if info, ok := parentInfo[out[i].SessionID]; ok {
+			if info.ParentSessionID != "" {
+				parentID := info.ParentSessionID
+				out[i].ParentSessionID = &parentID
+			}
+			out[i].RelationshipType = info.RelationshipType
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) GetUsageSessionCounts(

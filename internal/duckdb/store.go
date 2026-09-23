@@ -757,6 +757,14 @@ func (s *Store) GetChildSessions(ctx context.Context, parentID string) ([]db.Ses
 	return scanSessionRows(rows)
 }
 
+func (s *Store) GetSessionPrompts(ctx context.Context, sessionID string) ([]db.PromptNode, error) {
+	return db.GetSessionPromptsFor(ctx, s, sessionID)
+}
+
+func (s *Store) GetSessionExplorerRoots(ctx context.Context, filter db.SessionFilter) (db.SessionExplorerPage, error) {
+	return db.GetSessionExplorerRootsFor(ctx, s, filter)
+}
+
 func (s *Store) GetSessionVersion(ctx context.Context, id string) (int, int64, bool) {
 	var count int
 	var fileMtime sql.NullInt64

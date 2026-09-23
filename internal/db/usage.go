@@ -809,10 +809,12 @@ type dailyUsageScanRow struct {
 }
 
 type topSessionMetadata struct {
-	displayName string
-	agent       string
-	project     string
-	startedAt   string
+	displayName      string
+	agent            string
+	project          string
+	startedAt        string
+	parentSessionID  string
+	relationshipType string
 }
 
 func usageRowSelectFromRows(rowsSQL string) string {
@@ -1820,7 +1822,9 @@ SELECT
 	COALESCE(NULLIF(COALESCE(display_name, session_name), ''), NULLIF(first_message, ''), NULLIF(project, ''), id) AS display_name,
 	agent,
 	project,
-	COALESCE(started_at, '') AS started_at
+	COALESCE(started_at, '') AS started_at,
+	COALESCE(parent_session_id, '') AS parent_session_id,
+	COALESCE(relationship_type, '') AS relationship_type
 FROM sessions
 WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 	rows, err := db.getReader().QueryContext(ctx, query, args...)
@@ -1838,6 +1842,8 @@ WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 			&meta.agent,
 			&meta.project,
 			&meta.startedAt,
+			&meta.parentSessionID,
+			&meta.relationshipType,
 		); err != nil {
 			return nil, fmt.Errorf("scanning top session metadata: %w", err)
 		}
@@ -2831,6 +2837,69 @@ type TopSessionEntry struct {
 	CacheReadTokens     int         `json:"cacheReadTokens"`
 	TotalTokens         int         `json:"totalTokens"`
 	Cost                money.Money `json:"cost"`
+	// ParentSessionID links a session to another session in the same result
+	// set: a delegated subagent, a resumed continuation, or a fork. Populated
+	// from sessions.parent_session_id, which every provider that supports
+	// any of these relationships (Claude Code, Codex, Cursor, and others)
+	// sets consistently. Nil when the session has no such relationship.
+	ParentSessionID *string `json:"parentSessionId,omitempty"`
+	// RelationshipType mirrors sessions.relationship_type ("subagent",
+	// "continuation", or "fork"). Only "subagent" means delegated work whose
+	// cost should be folded into ParentSessionID's totals; a "continuation"
+	// or "fork" is a separate, sequential conversation and must not be
+	// treated as a child despite also carrying ParentSessionID.
+	RelationshipType string `json:"relationshipType,omitempty"`
+}
+
+// SessionParentInfo is a session's parent/relationship linkage, looked up
+// by session ID. It exists for backends (duckdb, clickhouse) whose primary
+// usage-aggregation query doesn't already join sessions for this data, so
+// they can batch a follow-up lookup instead of each reimplementing it.
+type SessionParentInfo struct {
+	ParentSessionID  string
+	RelationshipType string
+}
+
+// LoadSessionParentInfo batches a "parent_session_id/relationship_type by
+// session ID" lookup against the sessions table. queryContext is the
+// caller's own query executor (backends share the same `?`-placeholder
+// convention), so this helper works unmodified across SQL backends.
+func LoadSessionParentInfo(
+	ctx context.Context, sessionIDs []string,
+	queryContext func(ctx context.Context, query string, args ...any) (*sql.Rows, error),
+) (map[string]SessionParentInfo, error) {
+	out := make(map[string]SessionParentInfo, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(sessionIDs))
+	placeholders := make([]string, len(sessionIDs))
+	for i, id := range sessionIDs {
+		args[i] = id
+		placeholders[i] = "?"
+	}
+	rows, err := queryContext(ctx, `
+		SELECT id, COALESCE(parent_session_id, ''), COALESCE(relationship_type, '')
+		FROM sessions
+		WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying session parent info: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var info SessionParentInfo
+		if err := rows.Scan(&id, &info.ParentSessionID, &info.RelationshipType); err != nil {
+			return nil, fmt.Errorf("scanning session parent info: %w", err)
+		}
+		out[id] = info
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating session parent info: %w", err)
+	}
+	return out, nil
 }
 
 // TopSessionsSortCost and TopSessionsSortTokens select top-session ranking.
@@ -3026,6 +3095,11 @@ func (db *DB) getTopSessionsByCostLegacy(
 			result[i].Agent = meta.agent
 			result[i].Project = meta.project
 			result[i].StartedAt = meta.startedAt
+			if meta.parentSessionID != "" {
+				parentID := meta.parentSessionID
+				result[i].ParentSessionID = &parentID
+			}
+			result[i].RelationshipType = meta.relationshipType
 		}
 	}
 

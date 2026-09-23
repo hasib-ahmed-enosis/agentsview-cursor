@@ -802,6 +802,59 @@
   "usage_more_than_uncached": "{cost} de plus que le hors cache",
   "usage_top_sessions_by_cost": "Sessions les plus coûteuses",
   "usage_top_sessions_by_tokens": "Sessions principales par tokens",
+  "usage_subagent_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} sous-agent",
+        "countPlural=other": "{count} sous-agents"
+      }
+    }
+  ],
+  "usage_top_sessions_prompt_breakdown": "Sessions principales — Répartition par invite",
+  "usage_view_all_sessions": "Voir toutes les sessions",
+  "usage_tree_tag_session": "Session",
+  "usage_tree_tag_subagent": "Sous-agent",
+  "usage_tree_tag_prompt": "Invite",
+  "usage_tree_tag_continuation": "Continuation",
+  "usage_tree_turn_label": "Tour {ordinal}",
+  "usage_tree_message_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} message",
+        "countPlural=other": "{count} messages"
+      }
+    }
+  ],
+  "usage_tree_loading_prompts": "Chargement des invites…",
+  "usage_tree_no_prompts_found": "Aucune invite trouvée",
+  "session_explorer_title": "Explorateur de sessions",
+  "session_explorer_total_sessions": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} session",
+        "countPlural=other": "{count} sessions"
+      }
+    }
+  ],
+  "session_explorer_filter_project": "Projet",
+  "session_explorer_filter_agent": "Agent",
+  "session_explorer_filter_from": "Du",
+  "session_explorer_filter_to": "Au",
+  "session_explorer_filter_project_placeholder": "Tous les projets",
+  "session_explorer_filter_agent_placeholder": "Tous les agents",
+  "session_explorer_search": "Rechercher",
+  "session_explorer_search_placeholder": "Rechercher dans les sessions chargées…",
+  "session_explorer_no_search_results": "Aucune session chargée ne correspond à « {query} »",
+  "session_explorer_empty": "Aucune session ne correspond à ces filtres",
+  "session_explorer_load_more": "Charger plus",
+  "session_explorer_loading": "Chargement…",
+  "usage_tree_token_breakdown": "entrée {input} · sortie {output} · écriture cache {cacheWrite} · lecture cache {cacheRead}",
   "settings_title": "Paramètres",
   "settings_group_preferences": "Préférences",
   "settings_group_data": "Données",

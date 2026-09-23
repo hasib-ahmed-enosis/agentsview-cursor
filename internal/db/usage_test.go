@@ -2806,6 +2806,117 @@ func TestGetTopSessionsByCost(t *testing.T) {
 		"top[0].Cost should be > top[1].Cost")
 }
 
+// TestGetTopSessionsByCostParentLinkage verifies TopSessionEntry carries
+// ParentSessionID/RelationshipType for a subagent session and leaves them
+// nil/empty for a top-level session. sessions.parent_session_id is
+// populated by two different provider-side mechanisms upstream (the
+// tool_calls.subagent_session_id linkage most providers use, and Cursor's
+// agent-transcripts/<parent>/subagents/<id> directory-based linkage) but
+// both land on the same column by the time this query runs, so setting it
+// directly here exercises the query regardless of which mechanism wrote it.
+func TestGetTopSessionsByCostParentLinkage(t *testing.T) {
+	d := testDB(t)
+	ctx := t.Context()
+
+	insertSession(t, d, "root-1", "proj-a", func(s *Session) {
+		s.Agent = "claude"
+		s.StartedAt = new("2024-06-15T10:00:00Z")
+	})
+	insertMessages(t, d, Message{
+		SessionID: "root-1", Ordinal: 0,
+		Role: "assistant", Timestamp: "2024-06-15T10:30:00Z",
+		Model:      "claude-sonnet",
+		TokenUsage: jsontext.Value(`{"input_tokens":100,"output_tokens":50}`),
+	})
+
+	insertSession(t, d, "child-1", "proj-a", func(s *Session) {
+		s.Agent = "claude"
+		s.StartedAt = new("2024-06-15T10:05:00Z")
+		s.ParentSessionID = new("root-1")
+		s.RelationshipType = "subagent"
+	})
+	insertMessages(t, d, Message{
+		SessionID: "child-1", Ordinal: 0,
+		Role: "assistant", Timestamp: "2024-06-15T10:06:00Z",
+		Model:      "claude-sonnet",
+		TokenUsage: jsontext.Value(`{"input_tokens":10,"output_tokens":5}`),
+	})
+
+	top, err := d.GetTopSessionsByCost(ctx, UsageFilter{
+		From: "2024-06-01",
+		To:   "2024-06-30",
+	}, 20)
+	requireNoError(t, err, "GetTopSessionsByCost")
+	require.Len(t, top, 2, "len")
+
+	byID := map[string]TopSessionEntry{}
+	for _, entry := range top {
+		byID[entry.SessionID] = entry
+	}
+
+	root := byID["root-1"]
+	require.Nil(t, root.ParentSessionID, "root.ParentSessionID")
+	assert.Empty(t, root.RelationshipType, "root.RelationshipType")
+
+	child := byID["child-1"]
+	require.NotNil(t, child.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "root-1", *child.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "subagent", child.RelationshipType, "child.RelationshipType")
+}
+
+// TestGetTopSessionsByCostParentLinkageDirectoryBased mirrors the Cursor
+// case, where parent_session_id is populated from the
+// agent-transcripts/<parent>/subagents/<id> directory layout at parse time
+// (internal/parser/cursor.go) rather than via tool_calls.subagent_session_id.
+// That path sets relationship_type to "subagent" too (see cursor.go), so the
+// query layer must surface both fields the same way regardless of which
+// linkage mechanism populated them.
+func TestGetTopSessionsByCostParentLinkageDirectoryBased(t *testing.T) {
+	d := testDB(t)
+	ctx := t.Context()
+
+	insertSession(t, d, "cursor-root", "proj-a", func(s *Session) {
+		s.Agent = "cursor"
+		s.StartedAt = new("2024-06-15T10:00:00Z")
+	})
+	insertMessages(t, d, Message{
+		SessionID: "cursor-root", Ordinal: 0,
+		Role: "assistant", Timestamp: "2024-06-15T10:30:00Z",
+		Model:      "claude-sonnet",
+		TokenUsage: jsontext.Value(`{"input_tokens":100,"output_tokens":50}`),
+	})
+
+	insertSession(t, d, "cursor-sub", "proj-a", func(s *Session) {
+		s.Agent = "cursor"
+		s.StartedAt = new("2024-06-15T10:05:00Z")
+		s.ParentSessionID = new("cursor-root")
+		s.RelationshipType = "subagent"
+	})
+	insertMessages(t, d, Message{
+		SessionID: "cursor-sub", Ordinal: 0,
+		Role: "assistant", Timestamp: "2024-06-15T10:06:00Z",
+		Model:      "claude-sonnet",
+		TokenUsage: jsontext.Value(`{"input_tokens":10,"output_tokens":5}`),
+	})
+
+	top, err := d.GetTopSessionsByCost(ctx, UsageFilter{
+		From: "2024-06-01",
+		To:   "2024-06-30",
+	}, 20)
+	requireNoError(t, err, "GetTopSessionsByCost")
+	require.Len(t, top, 2, "len")
+
+	byID := map[string]TopSessionEntry{}
+	for _, entry := range top {
+		byID[entry.SessionID] = entry
+	}
+
+	sub := byID["cursor-sub"]
+	require.NotNil(t, sub.ParentSessionID, "cursor-sub.ParentSessionID")
+	assert.Equal(t, "cursor-root", *sub.ParentSessionID, "cursor-sub.ParentSessionID")
+	assert.Equal(t, "subagent", sub.RelationshipType, "cursor-sub.RelationshipType")
+}
+
 // TestGetTopSessionsByTokens ranks by total tokens and applies limit
 // against the token order, not a re-sort of a cost-truncated top-N.
 // A high-token/low-cost session must outrank a low-token/high-cost one.

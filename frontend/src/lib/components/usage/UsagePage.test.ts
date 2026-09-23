@@ -811,17 +811,24 @@ describe("UsagePage refresh behavior", () => {
     expect(source).toContain("<UsagePairwiseComparisonPanel />");
   });
 
-  it("keeps pairwise comparison below bounded secondary usage panels", () => {
-    const topSessionsIndex = source.indexOf("<TopSessionsTable />");
+  it("keeps pairwise comparison below the bounded cache-efficiency panel", () => {
     const cacheEfficiencyIndex = source.indexOf("<CacheEfficiencyPanel />");
     const pairwiseIndex = source.indexOf("<UsagePairwiseComparisonPanel />");
 
-    expect(topSessionsIndex).toBeGreaterThan(-1);
     expect(cacheEfficiencyIndex).toBeGreaterThan(-1);
     expect(pairwiseIndex).toBeGreaterThan(cacheEfficiencyIndex);
-    expect(pairwiseIndex).toBeGreaterThan(topSessionsIndex);
     expect(source).toContain('class="chart-panel bounded"');
     expect(source).toContain("max-height:");
     expect(source).toContain("overflow: auto;");
+  });
+
+  it("replaces the old agent-grouped tree with the recursive conversation tree", () => {
+    expect(source).not.toContain("AgentUsageTree");
+    expect(source).toContain("<ConversationTree>");
+  });
+
+  it("links the top-sessions tree to the full-page session explorer", () => {
+    expect(source).toContain('router.buildHref("session-explorer")');
+    expect(source).toContain("m.usage_view_all_sessions()");
   });
 });

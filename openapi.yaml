@@ -1938,6 +1938,32 @@ components:
       required:
         - projects
       type: object
+    DbPromptNode:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        messageCount:
+          format: int64
+          type: integer
+        ordinal:
+          format: int64
+          type: integer
+        sessionId:
+          type: string
+        startedAt:
+          type: string
+        subSessions:
+          items:
+            $ref: "#/components/schemas/DbSubSessionRef"
+          type: array
+      required:
+        - id
+        - sessionId
+        - ordinal
+        - startedAt
+        - messageCount
+      type: object
     DbQualitySignalTotals:
       additionalProperties: false
       properties:
@@ -3729,6 +3755,24 @@ components:
         - decoded_bytes
         - projects
       type: object
+    DbSubSessionRef:
+      additionalProperties: false
+      properties:
+        agent:
+          type: string
+        displayName:
+          type: string
+        relationshipType:
+          type: string
+        role:
+          type: string
+        sessionId:
+          type: string
+        startedAt:
+          type: string
+      required:
+        - sessionId
+      type: object
     DbTemporalHourlyUTCEntry:
       additionalProperties: false
       properties:
@@ -3963,7 +4007,11 @@ components:
         outputTokens:
           format: int64
           type: integer
+        parentSessionId:
+          type: string
         project:
+          type: string
+        relationshipType:
           type: string
         sessionId:
           type: string
@@ -18525,6 +18573,95 @@ paths:
       summary: List session pins
       tags:
         - Pins
+  /api/v1/sessions/{id}/prompts:
+    get:
+      operationId: get-api-v1-sessions-id-prompts
+      parameters:
+        - description: Session ID
+          in: path
+          name: id
+          required: true
+          schema:
+            description: Session ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/DbPromptNode"
+                type: array
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Service Unavailable
+        "504":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+          description: Gateway Timeout
+      summary: Get session prompt tree
+      tags:
+        - Sessions
   /api/v1/sessions/{id}/publish:
     post:
       operationId: post-api-v1-sessions-id-publish

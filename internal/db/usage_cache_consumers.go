@@ -202,6 +202,11 @@ func (db *DB) GetTopSessionsByCost(
 			entry.Agent = session.Agent
 			entry.Project = session.Project
 			entry.StartedAt = session.StartedAt
+			if session.ParentSessionID != "" {
+				parentID := session.ParentSessionID
+				entry.ParentSessionID = &parentID
+			}
+			entry.RelationshipType = session.RelationshipType
 		}
 		result = append(result, entry)
 	}

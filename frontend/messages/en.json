@@ -802,6 +802,59 @@
   "usage_more_than_uncached": "{cost} more than uncached",
   "usage_top_sessions_by_cost": "Top Sessions by Cost",
   "usage_top_sessions_by_tokens": "Top Sessions by Tokens",
+  "usage_subagent_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} sub-agent",
+        "countPlural=other": "{count} sub-agents"
+      }
+    }
+  ],
+  "usage_top_sessions_prompt_breakdown": "Top Sessions — Prompt Breakdown",
+  "usage_view_all_sessions": "View all sessions",
+  "usage_tree_tag_session": "Session",
+  "usage_tree_tag_subagent": "Sub-agent",
+  "usage_tree_tag_prompt": "Prompt",
+  "usage_tree_tag_continuation": "Continuation",
+  "usage_tree_turn_label": "Turn {ordinal}",
+  "usage_tree_message_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} message",
+        "countPlural=other": "{count} messages"
+      }
+    }
+  ],
+  "usage_tree_loading_prompts": "Loading prompts…",
+  "usage_tree_no_prompts_found": "No prompts found",
+  "session_explorer_title": "Session Explorer",
+  "session_explorer_total_sessions": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} session",
+        "countPlural=other": "{count} sessions"
+      }
+    }
+  ],
+  "session_explorer_filter_project": "Project",
+  "session_explorer_filter_agent": "Agent",
+  "session_explorer_filter_from": "From",
+  "session_explorer_filter_to": "To",
+  "session_explorer_filter_project_placeholder": "All projects",
+  "session_explorer_filter_agent_placeholder": "All agents",
+  "session_explorer_search": "Search",
+  "session_explorer_search_placeholder": "Search loaded sessions…",
+  "session_explorer_no_search_results": "No loaded sessions match \"{query}\"",
+  "session_explorer_empty": "No sessions match these filters",
+  "session_explorer_load_more": "Load more",
+  "session_explorer_loading": "Loading…",
+  "usage_tree_token_breakdown": "in {input} · out {output} · cache write {cacheWrite} · cache read {cacheRead}",
   "settings_title": "Settings",
   "settings_group_preferences": "Preferences",
   "settings_group_data": "Data",

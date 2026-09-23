@@ -802,6 +802,59 @@
   "usage_more_than_uncached": "キャッシュされていない場合よりも {cost} 高くなります",
   "usage_top_sessions_by_cost": "コスト別トップセッション",
   "usage_top_sessions_by_tokens": "トークン別トップセッション",
+  "usage_subagent_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "サブエージェント {count} 件",
+        "countPlural=other": "サブエージェント {count} 件"
+      }
+    }
+  ],
+  "usage_top_sessions_prompt_breakdown": "トップセッション — プロンプト内訳",
+  "usage_view_all_sessions": "すべてのセッションを見る",
+  "usage_tree_tag_session": "セッション",
+  "usage_tree_tag_subagent": "サブエージェント",
+  "usage_tree_tag_prompt": "プロンプト",
+  "usage_tree_tag_continuation": "継続",
+  "usage_tree_turn_label": "ターン {ordinal}",
+  "usage_tree_message_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "メッセージ {count} 件",
+        "countPlural=other": "メッセージ {count} 件"
+      }
+    }
+  ],
+  "usage_tree_loading_prompts": "プロンプトを読み込み中…",
+  "usage_tree_no_prompts_found": "プロンプトが見つかりません",
+  "session_explorer_title": "セッションエクスプローラー",
+  "session_explorer_total_sessions": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "セッション {count} 件",
+        "countPlural=other": "セッション {count} 件"
+      }
+    }
+  ],
+  "session_explorer_filter_project": "プロジェクト",
+  "session_explorer_filter_agent": "エージェント",
+  "session_explorer_filter_from": "開始日",
+  "session_explorer_filter_to": "終了日",
+  "session_explorer_filter_project_placeholder": "すべてのプロジェクト",
+  "session_explorer_filter_agent_placeholder": "すべてのエージェント",
+  "session_explorer_search": "検索",
+  "session_explorer_search_placeholder": "読み込み済みのセッションを検索…",
+  "session_explorer_no_search_results": "「{query}」に一致する読み込み済みセッションはありません",
+  "session_explorer_empty": "この条件に一致するセッションはありません",
+  "session_explorer_load_more": "もっと読み込む",
+  "session_explorer_loading": "読み込み中…",
+  "usage_tree_token_breakdown": "入力 {input} ・ 出力 {output} ・ キャッシュ書込 {cacheWrite} ・ キャッシュ読取 {cacheRead}",
   "settings_title": "設定",
   "settings_group_preferences": "設定",
   "settings_group_data": "データ",

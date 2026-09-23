@@ -28,7 +28,7 @@
   import UsagePairwiseComparisonPanel from "./UsagePairwiseComparisonPanel.svelte";
   import CostTimeSeriesChart from "./CostTimeSeriesChart.svelte";
   import AttributionPanel from "./AttributionPanel.svelte";
-  import TopSessionsTable from "./TopSessionsTable.svelte";
+  import ConversationTree from "./ConversationTree.svelte";
   import CacheEfficiencyPanel from "./CacheEfficiencyPanel.svelte";
   import SessionFilterControl from "../filters/SessionFilterControl.svelte";
   import SessionActiveFilters from "../filters/SessionActiveFilters.svelte";
@@ -563,14 +563,26 @@
       />
     </Card>
 
-    <div class="bottom-grid">
-      <Card level="default" padding="none" class="chart-panel bounded">
-        <TopSessionsTable />
-      </Card>
-      <Card level="default" padding="none" class="chart-panel bounded">
-        <CacheEfficiencyPanel />
-      </Card>
-    </div>
+    <Card level="default" padding="none" class="chart-panel wide">
+      <ConversationTree>
+        {#snippet headerAction()}
+          <a
+            class="view-all-sessions-link"
+            href={router.buildHref("session-explorer")}
+            onclick={(e) => {
+              e.preventDefault();
+              router.navigate("session-explorer");
+            }}
+          >
+            {m.usage_view_all_sessions()}
+          </a>
+        {/snippet}
+      </ConversationTree>
+    </Card>
+
+    <Card level="default" padding="none" class="chart-panel bounded">
+      <CacheEfficiencyPanel />
+    </Card>
 
     <Card level="default" padding="none" class="chart-panel wide">
       <UsagePairwiseComparisonPanel />
@@ -665,22 +677,20 @@
     width: 100%;
   }
 
-  .bottom-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    align-items: start;
-  }
-
   .usage-content :global(.chart-panel.bounded) {
     max-height: min(420px, 48vh);
     overflow: auto;
   }
 
-  @media (max-width: 760px) {
-    .bottom-grid {
-      grid-template-columns: 1fr;
-    }
+  .view-all-sessions-link {
+    font-size: 11px;
+    color: var(--accent-blue);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .view-all-sessions-link:hover {
+    text-decoration: underline;
   }
 
   @keyframes query-progress {

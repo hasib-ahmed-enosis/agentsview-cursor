@@ -2670,6 +2670,69 @@ func TestUsageDedupesClaudeMessageIDs(t *testing.T) {
 	assert.Equal(t, money.MustParseDollars("0.000033"), entry.Cost)
 }
 
+// TestGetTopSessionsByCostParentLinkage verifies a subagent session's
+// TopSessionEntry carries ParentSessionID/RelationshipType from
+// sessions.parent_session_id/relationship_type, populated by either the
+// tool_calls.subagent_session_id linkage most providers use, or Cursor's
+// directory-based agent-transcripts/<parent>/subagents/<id> linkage — both
+// land on the same sessions row by the time this query runs.
+func TestGetTopSessionsByCostParentLinkage(t *testing.T) {
+	ctx := t.Context()
+	local := newLocalDB(t)
+	require.NoError(t, local.UpsertModelPricing([]db.ModelPricing{{
+		ModelPattern:  "claude-test",
+		InputPerMTok:  money.MustParseDollars("3"),
+		OutputPerMTok: money.MustParseDollars("15"),
+	}}))
+
+	root := syncSession("duck-parent-root", "alpha", "root", "2026-01-13T00:00:00.000Z", 1)
+	child := syncSession("duck-parent-child", "alpha", "child", "2026-01-13T00:01:00.000Z", 1)
+	parentID := "duck-parent-root"
+	child.ParentSessionID = &parentID
+	child.RelationshipType = "subagent"
+
+	_, err := local.WriteSessionBatchAtomic(ctx, []db.SessionBatchWrite{
+		{
+			Session:         root,
+			Messages:        []db.Message{syncMessage("duck-parent-root", 0, "assistant", "root msg", "2026-01-13T00:00:00.000Z")},
+			DataVersion:     1,
+			ReplaceMessages: true,
+		},
+		{
+			Session:         child,
+			Messages:        []db.Message{syncMessage("duck-parent-child", 0, "assistant", "child msg", "2026-01-13T00:01:00.000Z")},
+			DataVersion:     1,
+			ReplaceMessages: true,
+		},
+	})
+	require.NoError(t, err)
+
+	syncer := newInMemoryTestSync(t, local, SyncOptions{})
+	require.NoError(t, createSchema(ctx, syncer.DB()))
+	_, err = syncer.pushEverything(ctx, nil)
+	require.NoError(t, err)
+	store := NewStoreFromDB(syncer.DB())
+	filter := db.UsageFilter{From: "2026-01-01", To: "2026-01-31"}
+
+	top, err := store.GetTopSessionsByCost(ctx, filter, 10)
+	require.NoError(t, err)
+	require.Len(t, top, 2)
+
+	byID := map[string]db.TopSessionEntry{}
+	for _, entry := range top {
+		byID[entry.SessionID] = entry
+	}
+
+	rootEntry := byID["duck-parent-root"]
+	assert.Nil(t, rootEntry.ParentSessionID, "root.ParentSessionID")
+	assert.Empty(t, rootEntry.RelationshipType, "root.RelationshipType")
+
+	childEntry := byID["duck-parent-child"]
+	require.NotNil(t, childEntry.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "duck-parent-root", *childEntry.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "subagent", childEntry.RelationshipType, "child.RelationshipType")
+}
+
 func TestSessionUsagePrefersCompleteClaudeSnapshot(t *testing.T) {
 	ctx := t.Context()
 	local := newLocalDB(t)
@@ -3870,6 +3933,61 @@ func TestGetChildSessionsOrderedByStartedAt(t *testing.T) {
 	assert.Equal(t,
 		[]string{"duck-child-early", "duck-child-late"},
 		duckSessionIDs(children))
+}
+
+func TestGetSessionPromptsAttributesSubAgentDispatch(t *testing.T) {
+	ctx := t.Context()
+	local := newLocalDB(t)
+
+	root := syncSession("duck-prompt-root", "alpha", "explore the repo", "2026-01-10T00:00:00.000Z", 2)
+	sub := syncSession("duck-prompt-sub", "alpha", "sub ask", "2026-01-10T00:00:05.000Z", 1)
+	parentID := root.ID
+	sub.ParentSessionID = &parentID
+	sub.RelationshipType = "subagent"
+
+	dispatch := syncMessage(root.ID, 1, "assistant", "[Task: explore (Explore)]", "2026-01-10T00:00:03.000Z",
+		db.ToolCall{
+			ToolName:          "Task",
+			ToolUseID:         "tu1",
+			SubagentSessionID: sub.ID,
+			InputJSON:         `{"subagent_type":"Explore"}`,
+		},
+	)
+
+	writes := []db.SessionBatchWrite{
+		{
+			Session: root,
+			Messages: []db.Message{
+				syncMessage(root.ID, 0, "user", "explore the repo", "2026-01-10T00:00:00.000Z"),
+				dispatch,
+			},
+			DataVersion:     1,
+			ReplaceMessages: true,
+		},
+		{
+			Session:         sub,
+			Messages:        []db.Message{syncMessage(sub.ID, 0, "user", "sub ask", "2026-01-10T00:00:05.000Z")},
+			DataVersion:     1,
+			ReplaceMessages: true,
+		},
+	}
+	_, err := local.WriteSessionBatchAtomic(ctx, writes)
+	require.NoError(t, err)
+
+	syncer := newInMemoryTestSync(t, local, SyncOptions{})
+	require.NoError(t, createSchema(ctx, syncer.DB()))
+	_, err = syncer.pushEverything(ctx, nil)
+	require.NoError(t, err)
+	store := NewStoreFromDB(syncer.DB())
+
+	prompts, err := store.GetSessionPrompts(ctx, "duck-prompt-root")
+	require.NoError(t, err)
+	require.Len(t, prompts, 1, "prompts")
+	require.Len(t, prompts[0].SubSessions, 1, "prompts[0].SubSessions")
+	sub0 := prompts[0].SubSessions[0]
+	assert.Equal(t, "duck-prompt-sub", sub0.SessionID, "sub0.SessionID")
+	assert.Equal(t, "Explore", sub0.Role, "sub0.Role")
+	assert.Equal(t, "subagent", sub0.RelationshipType, "sub0.RelationshipType")
 }
 
 func TestStoreSessionUsageRollupParity(t *testing.T) {

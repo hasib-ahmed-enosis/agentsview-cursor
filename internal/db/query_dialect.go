@@ -552,6 +552,23 @@ func (d QueryDialect) SidebarChildRelationshipsSQL() string {
 	return strings.Join(quoted, ", ")
 }
 
+// rootExcludeRelationshipsSQL renders the relationship_type values excluded
+// from an IncludeChildren=false root listing: f.RootExcludeRelationships
+// when the caller supplied one (e.g. the session explorer, which keeps
+// forks as their own roots but folds continuations into their origin
+// session), otherwise the dialect's default sidebar exclusion list
+// (subagent, fork), preserving every existing caller's behavior unchanged.
+func rootExcludeRelationshipsSQL(f SessionFilter, dialect QueryDialect) string {
+	if len(f.RootExcludeRelationships) == 0 {
+		return dialect.SidebarChildRelationshipsSQL()
+	}
+	quoted := make([]string, 0, len(f.RootExcludeRelationships))
+	for _, rel := range f.RootExcludeRelationships {
+		quoted = append(quoted, "'"+rel+"'")
+	}
+	return strings.Join(quoted, ", ")
+}
+
 func (d QueryDialect) CanonicalChildRelationshipsSQL() string {
 	quoted := make([]string, 0, len(d.canonicalChildRelationships))
 	for _, rel := range d.canonicalChildRelationships {
@@ -613,7 +630,7 @@ func buildSessionFilterWithBuilder(
 	}
 	if !f.IncludeChildren {
 		basePreds = append(basePreds,
-			q("relationship_type")+" NOT IN ("+b.dialect.SidebarChildRelationshipsSQL()+")")
+			q("relationship_type")+" NOT IN ("+rootExcludeRelationshipsSQL(f, b.dialect)+")")
 	}
 
 	if !f.IncludeChildren {

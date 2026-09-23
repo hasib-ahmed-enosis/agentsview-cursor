@@ -775,6 +775,56 @@
   "usage_more_than_uncached": "比未缓存多 {cost}",
   "usage_top_sessions_by_cost": "按成本排序的热门会话",
   "usage_top_sessions_by_tokens": "按 Token 排序的热门会话",
+  "usage_subagent_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 个子代理"
+      }
+    }
+  ],
+  "usage_top_sessions_prompt_breakdown": "热门会话 — 按提示细分",
+  "usage_view_all_sessions": "查看所有会话",
+  "usage_tree_tag_session": "会话",
+  "usage_tree_tag_subagent": "子代理",
+  "usage_tree_tag_prompt": "提示",
+  "usage_tree_tag_continuation": "续接",
+  "usage_tree_turn_label": "第 {ordinal} 轮",
+  "usage_tree_message_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 条消息"
+      }
+    }
+  ],
+  "usage_tree_loading_prompts": "正在加载提示…",
+  "usage_tree_no_prompts_found": "未找到提示",
+  "session_explorer_title": "会话浏览器",
+  "session_explorer_total_sessions": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 个会话"
+      }
+    }
+  ],
+  "session_explorer_filter_project": "项目",
+  "session_explorer_filter_agent": "代理",
+  "session_explorer_filter_from": "起始",
+  "session_explorer_filter_to": "结束",
+  "session_explorer_filter_project_placeholder": "所有项目",
+  "session_explorer_filter_agent_placeholder": "所有代理",
+  "session_explorer_search": "搜索",
+  "session_explorer_search_placeholder": "搜索已加载的会话…",
+  "session_explorer_no_search_results": "没有已加载的会话匹配“{query}”",
+  "session_explorer_empty": "没有符合这些筛选条件的会话",
+  "session_explorer_load_more": "加载更多",
+  "session_explorer_loading": "加载中…",
+  "usage_tree_token_breakdown": "输入 {input} · 输出 {output} · 缓存写入 {cacheWrite} · 缓存读取 {cacheRead}",
   "settings_title": "设置",
   "settings_group_preferences": "偏好设置",
   "settings_group_data": "数据",

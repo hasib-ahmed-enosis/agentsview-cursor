@@ -60,3 +60,46 @@ func TestClickHouseUsageCostFromFixture(t *testing.T) {
 	assert.GreaterOrEqual(t, gotDaily.Totals.TotalCost.Microdollars, eventCost.Microdollars,
 		"UTC window covering 2026-01-10 should include the usage-event cost")
 }
+
+// TestClickHouseTopSessionsByCostParentLinkage verifies a subagent
+// session's TopSessionEntry carries ParentSessionID/RelationshipType from
+// sessions.parent_session_id/relationship_type. seedFixture already wires
+// fixtureChildID as a subagent of fixtureAlphaID (mirroring the
+// tool_calls.subagent_session_id linkage most providers use; Cursor's
+// directory-based agent-transcripts/<parent>/subagents/<id> linkage lands
+// on the same column, so this query needs no per-provider branching).
+func TestClickHouseTopSessionsByCostParentLinkage(t *testing.T) {
+	ctx := context.Background()
+	local, target := seedFixture(t)
+	syncer := newTestSync(t, local, target, SyncOptions{})
+	_, err := syncer.Push(ctx, false, nil)
+	require.NoError(t, err)
+	require.NoError(t, syncer.syncModelPricing(ctx))
+
+	store, err := NewStore(ctx, target)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	top, err := store.GetTopSessionsByCost(ctx, db.UsageFilter{
+		From:     "2026-01-10",
+		To:       "2026-01-10",
+		Timezone: "UTC",
+	}, 20)
+	require.NoError(t, err)
+
+	byID := map[string]db.TopSessionEntry{}
+	for _, entry := range top {
+		byID[entry.SessionID] = entry
+	}
+
+	root, ok := byID[fixtureAlphaID]
+	require.True(t, ok, "expected root session in top sessions")
+	assert.Nil(t, root.ParentSessionID, "root.ParentSessionID")
+	assert.Empty(t, root.RelationshipType, "root.RelationshipType")
+
+	child, ok := byID[fixtureChildID]
+	require.True(t, ok, "expected subagent child session in top sessions")
+	require.NotNil(t, child.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, fixtureAlphaID, *child.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "subagent", child.RelationshipType, "child.RelationshipType")
+}

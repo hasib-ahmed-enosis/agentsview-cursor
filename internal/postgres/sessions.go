@@ -1005,6 +1005,14 @@ func (s *Store) GetChildSessions(
 	return scanPGSessionRows(rows)
 }
 
+func (s *Store) GetSessionPrompts(ctx context.Context, sessionID string) ([]db.PromptNode, error) {
+	return db.GetSessionPromptsFor(ctx, s, sessionID)
+}
+
+func (s *Store) GetSessionExplorerRoots(ctx context.Context, filter db.SessionFilter) (db.SessionExplorerPage, error) {
+	return db.GetSessionExplorerRootsFor(ctx, s, filter)
+}
+
 // GetStats returns database statistics, counting only root
 // sessions with messages.
 func (s *Store) GetStats(

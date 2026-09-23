@@ -968,3 +968,14 @@ func (s *Sync) syncModelPricing(ctx context.Context) error {
 	}
 	return nil
 }
+
+// LoadPricingResolver implements Store.LoadPricingResolver for the
+// PostgreSQL backend, wrapping the existing in-memory pricing map used by
+// the usage rollup paths.
+func (s *Store) LoadPricingResolver(ctx context.Context) (*export.PricingResolver, error) {
+	rows, err := s.loadPricingMap(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loading pricing map: %w", err)
+	}
+	return export.NewPricingResolver(rows), nil
+}

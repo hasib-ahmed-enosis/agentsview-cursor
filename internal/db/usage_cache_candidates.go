@@ -54,6 +54,8 @@ type usageQuerySession struct {
 	IsAutomated       bool
 	TerminationStatus string
 	PassesFilter      bool
+	ParentSessionID   string
+	RelationshipType  string
 }
 
 type usageQueryInterval struct {
@@ -298,7 +300,8 @@ func loadUsageQuerySessionRecords(
 			COALESCE(s.is_automated, 0),
 			COALESCE(s.termination_status, ''),
 			CASE WHEN (` + filterWhere + `) THEN 1 ELSE 0 END,
-			COALESCE(s.sync_marker, ''), COALESCE(s.transcript_revision, '0')
+			COALESCE(s.sync_marker, ''), COALESCE(s.transcript_revision, '0'),
+			COALESCE(s.parent_session_id, ''), COALESCE(s.relationship_type, '')
 		FROM sessions s
 		WHERE s.deleted_at IS NULL AND s.id IN (` +
 				strings.Join(placeholders, ",") + `)
@@ -323,6 +326,7 @@ func loadUsageQuerySessionRecords(
 					&hasTotalOutput, &hasPeakContext,
 					&automated, &record.session.TerminationStatus, &passes,
 					&record.version.SyncMarker, &record.version.TranscriptRevision,
+					&record.session.ParentSessionID, &record.session.RelationshipType,
 				); err != nil {
 					_ = rows.Close()
 					return fmt.Errorf("scanning usage candidate metadata: %w", err)

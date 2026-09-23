@@ -550,17 +550,25 @@ type SessionFilter struct {
 	// sessions keep the one-shot exclusion unchanged; every other caller
 	// (session list, substring/regex/fts search) leaves this false.
 	ChildExemptOneShot bool
-	ExcludeAutomated   bool     // exclude sessions where is_automated = 1
-	AutomatedScope     string   // "", "human", "all", or "automated"
-	IncludeChildren    bool     // include subagent sessions (for sidebar grouping)
-	IncludeEmpty       bool     // include zero-message sessions for project mapping
-	IncludeOrphans     bool     // promote orphan child rows to sidebar roots
-	IncludeSource      bool     // include the session source file path in list rows
-	Outcome            []string // filter by outcome values
-	HealthGrade        []string // filter by health grade values
-	MinToolFailures    *int     // minimum tool_failure_signal_count
-	HasSecret          bool     // only sessions with current secret_leak_count > 0
-	Starred            bool     // only sessions starred by the user
+	ExcludeAutomated   bool   // exclude sessions where is_automated = 1
+	AutomatedScope     string // "", "human", "all", or "automated"
+	IncludeChildren    bool   // include subagent sessions (for sidebar grouping)
+	// RootExcludeRelationships overrides which relationship_type values are
+	// excluded from a root listing when IncludeChildren is false. Nil (the
+	// default) preserves every existing caller's behavior (excludes
+	// subagent and fork). The session explorer sets this explicitly to
+	// {"subagent", "continuation"} so forks surface as their own root
+	// Session while continuations are folded forward into the session they
+	// continue instead of duplicating it as a separate root.
+	RootExcludeRelationships []string
+	IncludeEmpty             bool     // include zero-message sessions for project mapping
+	IncludeOrphans           bool     // promote orphan child rows to sidebar roots
+	IncludeSource            bool     // include the session source file path in list rows
+	Outcome                  []string // filter by outcome values
+	HealthGrade              []string // filter by health grade values
+	MinToolFailures          *int     // minimum tool_failure_signal_count
+	HasSecret                bool     // only sessions with current secret_leak_count > 0
+	Starred                  bool     // only sessions starred by the user
 	// SecretsRulesVersions limits HasSecret to sessions scanned by one of these
 	// current scanner versions. Empty preserves raw DB semantics for tests and
 	// direct store callers that explicitly want unversioned counts.

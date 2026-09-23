@@ -777,6 +777,56 @@
   "usage_more_than_uncached": "캐시하지 않았을 때보다 {cost} 더 많음",
   "usage_top_sessions_by_cost": "비용 상위 세션",
   "usage_top_sessions_by_tokens": "토큰 상위 세션",
+  "usage_subagent_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "하위 에이전트 {count}개"
+      }
+    }
+  ],
+  "usage_top_sessions_prompt_breakdown": "상위 세션 — 프롬프트별 분석",
+  "usage_view_all_sessions": "모든 세션 보기",
+  "usage_tree_tag_session": "세션",
+  "usage_tree_tag_subagent": "하위 에이전트",
+  "usage_tree_tag_prompt": "프롬프트",
+  "usage_tree_tag_continuation": "연속",
+  "usage_tree_turn_label": "턴 {ordinal}",
+  "usage_tree_message_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "메시지 {count}개"
+      }
+    }
+  ],
+  "usage_tree_loading_prompts": "프롬프트 불러오는 중…",
+  "usage_tree_no_prompts_found": "프롬프트를 찾을 수 없습니다",
+  "session_explorer_title": "세션 탐색기",
+  "session_explorer_total_sessions": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "세션 {count}개"
+      }
+    }
+  ],
+  "session_explorer_filter_project": "프로젝트",
+  "session_explorer_filter_agent": "에이전트",
+  "session_explorer_filter_from": "시작일",
+  "session_explorer_filter_to": "종료일",
+  "session_explorer_filter_project_placeholder": "모든 프로젝트",
+  "session_explorer_filter_agent_placeholder": "모든 에이전트",
+  "session_explorer_search": "검색",
+  "session_explorer_search_placeholder": "불러온 세션 검색…",
+  "session_explorer_no_search_results": "\"{query}\"와(과) 일치하는 불러온 세션이 없습니다",
+  "session_explorer_empty": "이 필터와 일치하는 세션이 없습니다",
+  "session_explorer_load_more": "더 보기",
+  "session_explorer_loading": "불러오는 중…",
+  "usage_tree_token_breakdown": "입력 {input} · 출력 {output} · 캐시 쓰기 {cacheWrite} · 캐시 읽기 {cacheRead}",
   "settings_title": "설정",
   "settings_group_preferences": "환경설정",
   "settings_group_data": "데이터",

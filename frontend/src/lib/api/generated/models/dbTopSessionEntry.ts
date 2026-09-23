@@ -11,7 +11,9 @@ export interface DbTopSessionEntry {
   displayName: string;
   inputTokens: number;
   outputTokens: number;
+  parentSessionId?: string;
   project: string;
+  relationshipType?: string;
   sessionId: string;
   startedAt: string;
   totalTokens: number;

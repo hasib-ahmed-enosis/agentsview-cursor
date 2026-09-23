@@ -60,6 +60,7 @@
   import PerfDebugPanel from "./lib/components/debug/PerfDebugPanel.svelte";
   import AnalyticsPage from "./lib/components/analytics/AnalyticsPage.svelte";
   import UsagePage from "./lib/components/usage/UsagePage.svelte";
+  import SessionExplorerPage from "./lib/components/explorer/SessionExplorerPage.svelte";
   import ActivityPage from "./lib/components/activity/ActivityPage.svelte";
   import TrendsPage from "./lib/components/trends/TrendsPage.svelte";
   import RecallPage from "./lib/components/recall/RecallPage.svelte";
@@ -812,6 +813,10 @@
 {#if router.route === "usage" || router.route === "token-usage"}
   <div class="page-scroll">
     <UsagePage />
+  </div>
+{:else if router.route === "session-explorer"}
+  <div class="page-scroll">
+    <SessionExplorerPage />
   </div>
 {:else if router.route === "activity"}
   <div class="page-scroll">

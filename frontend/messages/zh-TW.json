@@ -775,6 +775,56 @@
   "usage_more_than_uncached": "比未快取多 {cost}",
   "usage_top_sessions_by_cost": "按成本排序的熱門對話",
   "usage_top_sessions_by_tokens": "按 Token 排序的熱門會話",
+  "usage_subagent_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 個子代理"
+      }
+    }
+  ],
+  "usage_top_sessions_prompt_breakdown": "熱門對話 — 依提示細分",
+  "usage_view_all_sessions": "查看所有對話",
+  "usage_tree_tag_session": "對話",
+  "usage_tree_tag_subagent": "子代理",
+  "usage_tree_tag_prompt": "提示",
+  "usage_tree_tag_continuation": "接續",
+  "usage_tree_turn_label": "第 {ordinal} 輪",
+  "usage_tree_message_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 則訊息"
+      }
+    }
+  ],
+  "usage_tree_loading_prompts": "正在載入提示…",
+  "usage_tree_no_prompts_found": "找不到提示",
+  "session_explorer_title": "對話瀏覽器",
+  "session_explorer_total_sessions": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 個對話"
+      }
+    }
+  ],
+  "session_explorer_filter_project": "專案",
+  "session_explorer_filter_agent": "代理",
+  "session_explorer_filter_from": "起始",
+  "session_explorer_filter_to": "結束",
+  "session_explorer_filter_project_placeholder": "所有專案",
+  "session_explorer_filter_agent_placeholder": "所有代理",
+  "session_explorer_search": "搜尋",
+  "session_explorer_search_placeholder": "搜尋已載入的對話…",
+  "session_explorer_no_search_results": "沒有已載入的對話符合「{query}」",
+  "session_explorer_empty": "沒有符合篩選條件的對話",
+  "session_explorer_load_more": "載入更多",
+  "session_explorer_loading": "載入中…",
+  "usage_tree_token_breakdown": "輸入 {input} · 輸出 {output} · 快取寫入 {cacheWrite} · 快取讀取 {cacheRead}",
   "settings_title": "設定",
   "settings_group_preferences": "偏好設定",
   "settings_group_data": "資料",

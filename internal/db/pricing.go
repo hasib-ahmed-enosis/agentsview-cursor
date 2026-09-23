@@ -8,8 +8,20 @@ import (
 	"slices"
 	"strings"
 
+	"go.kenn.io/agentsview/internal/export"
 	"go.kenn.io/agentsview/internal/money"
 )
+
+// LoadPricingResolver implements Store.LoadPricingResolver for the SQLite
+// backend, wrapping the existing in-memory pricing map used by the usage
+// rollup paths.
+func (db *DB) LoadPricingResolver(ctx context.Context) (*export.PricingResolver, error) {
+	rows, err := db.loadPricingMap(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loading pricing map: %w", err)
+	}
+	return export.NewPricingResolver(rows), nil
+}
 
 // ModelPricing holds per-model token pricing (per million tokens).
 // CacheCreation1hPerMTok is the 1-hour-TTL cache-write rate; zero means

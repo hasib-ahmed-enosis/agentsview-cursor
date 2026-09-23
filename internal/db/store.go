@@ -38,6 +38,12 @@ type Store interface {
 	// colon/tilde-delimited suffix before applying limit.
 	FindSessionIDsByRawSuffix(ctx context.Context, raw string, limit int) ([]string, error)
 	GetChildSessions(ctx context.Context, parentID string) ([]Session, error)
+	GetSessionPrompts(ctx context.Context, sessionID string) ([]PromptNode, error)
+	// GetSessionExplorerRoots returns a paginated page of root-level
+	// sessions (see GetSessionExplorerRootsFor), each decorated with its
+	// own subtree's rolled-up token/cost totals, for the session
+	// explorer's top-level list.
+	GetSessionExplorerRoots(ctx context.Context, filter SessionFilter) (SessionExplorerPage, error)
 
 	// Messages.
 	GetMessages(ctx context.Context, sessionID string, from, limit int, asc bool) ([]Message, error)
@@ -103,6 +109,11 @@ type Store interface {
 	GetUsageSessionCounts(ctx context.Context, f UsageFilter) (UsageSessionCounts, error)
 	GetUsageMatchingSessionCount(ctx context.Context, f UsageFilter) (int, error)
 	GetSessionUsage(ctx context.Context, sessionID string, includeBreakdown bool) (*SessionUsage, error)
+	// LoadPricingResolver returns a resolver for turning a message's
+	// model + token counts into cost, for callers (e.g. GetSessionPromptsFor)
+	// that need per-message cost outside the existing SQL-aggregated
+	// usage-rollup query paths.
+	LoadPricingResolver(ctx context.Context) (*export.PricingResolver, error)
 
 	// Stars.
 	StarSession(ctx context.Context, sessionID string) (bool, error)

@@ -565,10 +565,12 @@ type pgDailyUsageScanRow struct {
 }
 
 type pgTopSessionMetadata struct {
-	displayName string
-	agent       string
-	project     string
-	startedAt   string
+	displayName      string
+	agent            string
+	project          string
+	startedAt        string
+	parentSessionID  string
+	relationshipType string
 }
 
 func pgUsageRowSelectFromRows(rowsSQL string) string {
@@ -1518,7 +1520,9 @@ SELECT
 	COALESCE(NULLIF(COALESCE(display_name, session_name), ''), NULLIF(first_message, ''), NULLIF(project, ''), id) AS display_name,
 	agent,
 	project,
-	started_at
+	started_at,
+	COALESCE(parent_session_id, '') AS parent_session_id,
+	COALESCE(relationship_type, '') AS relationship_type
 FROM sessions
 WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 	rows, err := s.pg.QueryContext(ctx, query, pb.args...)
@@ -1537,6 +1541,8 @@ WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 			&meta.agent,
 			&meta.project,
 			&startedAt,
+			&meta.parentSessionID,
+			&meta.relationshipType,
 		); err != nil {
 			return nil,
 				fmt.Errorf("scanning pg top session metadata: %w", err)
@@ -2463,6 +2469,11 @@ func (s *Store) GetTopSessionsByCost(
 			result[i].Agent = meta.agent
 			result[i].Project = meta.project
 			result[i].StartedAt = meta.startedAt
+			if meta.parentSessionID != "" {
+				parentID := meta.parentSessionID
+				result[i].ParentSessionID = &parentID
+			}
+			result[i].RelationshipType = meta.relationshipType
 		}
 	}
 	return result, nil

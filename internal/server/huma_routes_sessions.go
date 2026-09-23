@@ -36,6 +36,8 @@ func (s *Server) registerSessionRoutes() {
 	s.get(group, "/sessions/{id}/messages", "List session messages", s.humaGetMessages)
 	s.get(group, "/sessions/{id}/tool-calls", "List session tool calls", s.humaToolCalls)
 	s.get(group, "/sessions/{id}/children", "List child sessions", s.humaGetChildSessions)
+	s.get(group, "/sessions/{id}/prompts", "Get session prompt tree", s.humaGetSessionPrompts)
+	s.get(group, "/sessions/explorer/roots", "List session explorer root sessions", s.humaGetSessionExplorerRoots)
 	s.get(group, "/sessions/{id}/activity", "Get session activity", s.humaGetSessionActivity)
 	s.get(group, "/sessions/{id}/timing", "Get session timing", s.humaSessionTiming)
 	// Huma does not infer nullability for pointers to object schemas.
@@ -305,6 +307,46 @@ func (s *Server) humaGetChildSessions(
 		children = []db.Session{}
 	}
 	return &jsonOutput[[]db.Session]{Body: children}, nil
+}
+
+// humaGetSessionPrompts returns a session's Prompt/sub-session-dispatch
+// tree, one level deep: an unknown session ID yields an empty array (not
+// a 404), matching humaGetChildSessions. Callers expand a sub-session's
+// own prompts by calling this same route again with its ID.
+func (s *Server) humaGetSessionPrompts(
+	ctx context.Context,
+	in *idPathInput,
+) (*jsonOutput[[]db.PromptNode], error) {
+	prompts, err := s.db.GetSessionPrompts(ctx, in.ID)
+	if err != nil {
+		return nil, serverError(err)
+	}
+	if prompts == nil {
+		prompts = []db.PromptNode{}
+	}
+	return &jsonOutput[[]db.PromptNode]{Body: prompts}, nil
+}
+
+// humaGetSessionExplorerRoots returns a paginated page of root-level
+// sessions for the session explorer's top-level list, each decorated with
+// its own subtree's rolled-up token/cost totals. Callers expand a row's
+// Prompts/sub-sessions lazily via GET /sessions/{id}/prompts.
+func (s *Server) humaGetSessionExplorerRoots(
+	ctx context.Context,
+	in *sessionFilterInput,
+) (*jsonOutput[db.SessionExplorerPage], error) {
+	filter, err := in.dbFilter(false)
+	if err != nil {
+		return nil, err
+	}
+	page, err := s.db.GetSessionExplorerRoots(ctx, filter)
+	if err != nil {
+		if errors.Is(err, db.ErrInvalidCursor) {
+			return nil, apiError(http.StatusBadRequest, "invalid cursor")
+		}
+		return nil, serverError(err)
+	}
+	return &jsonOutput[db.SessionExplorerPage]{Body: page}, nil
 }
 
 func (s *Server) humaGetMessages(

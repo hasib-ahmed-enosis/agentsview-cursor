@@ -916,6 +916,71 @@ func TestStoreGetTopSessionsByCostDedupesClaudeKeys(t *testing.T) {
 	assert.Equal(t, "usage-top-001", top[0].SessionID)
 }
 
+// TestStoreGetTopSessionsByCostParentLinkage verifies a subagent session's
+// TopSessionEntry carries ParentSessionID/RelationshipType, populated from
+// sessions.parent_session_id/relationship_type. That column is written by
+// two different provider-side mechanisms upstream (tool_calls.
+// subagent_session_id for most providers, or Cursor's directory-based
+// agent-transcripts/<parent>/subagents/<id> linkage), but both land on the
+// same sessions row by the time this query runs.
+func TestStoreGetTopSessionsByCostParentLinkage(t *testing.T) {
+	_, store := prepareUsageSchema(t, "agentsview_usage_top_parent_test")
+
+	ctx := context.Background()
+	_, err := store.DB().ExecContext(ctx, `
+		INSERT INTO model_pricing (
+			model_pattern, input_microdollars_per_mtok, output_microdollars_per_mtok,
+			cache_creation_microdollars_per_mtok, cache_read_microdollars_per_mtok, updated_at
+		) VALUES ('test-model-parent', 1000000, 0, 0, 0, 'seed')`)
+	require.NoError(t, err, "insert pricing")
+	_, err = store.DB().ExecContext(ctx, `
+		INSERT INTO sessions (
+			id, machine, project, agent, started_at,
+			message_count, user_message_count,
+			parent_session_id, relationship_type
+		) VALUES
+			('usage-parent-root', 'test-machine', 'proj-a', 'claude',
+			 '2026-03-12T10:00:00Z'::timestamptz, 1, 1, NULL, ''),
+			('usage-parent-child', 'test-machine', 'proj-a', 'claude',
+			 '2026-03-12T10:01:00Z'::timestamptz, 1, 1,
+			 'usage-parent-root', 'subagent')`)
+	require.NoError(t, err, "insert sessions")
+	_, err = store.DB().ExecContext(ctx, `
+		INSERT INTO messages (
+			session_id, ordinal, role, content, timestamp, content_length,
+			model, token_usage
+		) VALUES
+			('usage-parent-root', 0, 'assistant', 'root',
+			 '2026-03-12T10:00:00Z'::timestamptz, 4,
+			 'test-model-parent', '{"input_tokens":100}'),
+			('usage-parent-child', 0, 'assistant', 'child',
+			 '2026-03-12T10:01:00Z'::timestamptz, 5,
+			 'test-model-parent', '{"input_tokens":10}')`)
+	require.NoError(t, err, "insert messages")
+
+	top, err := store.GetTopSessionsByCost(ctx, db.UsageFilter{
+		From:     "2026-03-12",
+		To:       "2026-03-12",
+		Timezone: "UTC",
+	}, 20)
+	require.NoError(t, err, "GetTopSessionsByCost")
+	require.Len(t, top, 2)
+
+	byID := map[string]db.TopSessionEntry{}
+	for _, entry := range top {
+		byID[entry.SessionID] = entry
+	}
+
+	root := byID["usage-parent-root"]
+	assert.Nil(t, root.ParentSessionID, "root.ParentSessionID")
+	assert.Empty(t, root.RelationshipType, "root.RelationshipType")
+
+	child := byID["usage-parent-child"]
+	require.NotNil(t, child.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "usage-parent-root", *child.ParentSessionID, "child.ParentSessionID")
+	assert.Equal(t, "subagent", child.RelationshipType, "child.RelationshipType")
+}
+
 func TestStoreGetTopSessionsByCostDedupesSourceUUIDFallback(t *testing.T) {
 	_, store := prepareUsageSchema(t, "agentsview_usage_top_source_uuid_test")
 
