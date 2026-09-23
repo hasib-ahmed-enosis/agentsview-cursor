@@ -429,6 +429,14 @@ func claudeParseFile(
 	} else if opts.aiTitleFallback && !renameSeen {
 		displayName = compatibleAI
 	}
+	// The CLI transcript itself carries no title unless /rename was used
+	// or the CLI emitted an ai-title event; fall back to the title the
+	// Claude desktop app generates independently for the same session, if
+	// this machine has one. A rename to empty is an explicit clear and
+	// must not be overridden.
+	if displayName == "" && !renameSeen && !opts.uploadIdentity {
+		displayName = claudeDesktopSessionTitle(sessionID)
+	}
 
 	meta := claudeSessionMeta{
 		sourceSessionID: sourceSessionID,
