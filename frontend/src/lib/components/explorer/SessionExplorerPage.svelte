@@ -10,6 +10,9 @@
   import { m } from "../../i18n/index.js";
   import ConversationTree from "../usage/ConversationTree.svelte";
   import type { SessionTreeNode } from "../usage/ConversationTreeNode.svelte";
+  import ProjectTypeahead from "../layout/ProjectTypeahead.svelte";
+  import AgentTypeahead from "../layout/AgentTypeahead.svelte";
+  import { compareMoney } from "../../money.js";
 
   function displayNameFor(row: (typeof sessionExplorer.rows)[number]): string {
     return row.display_name || row.first_message || row.project || row.id;
@@ -39,8 +42,56 @@
       : sessionExplorer.rows,
   );
 
+  // Client-side sort over the rows loaded so far (like the search box
+  // above, this only reorders what "Load more" has fetched — it does not
+  // re-query the server).
+  type SortKey =
+    | "name"
+    | "date"
+    | "cost"
+    | "total_tokens"
+    | "input_tokens"
+    | "output_tokens"
+    | "cache_write_tokens"
+    | "cache_read_tokens";
+
+  let sortKey = $state<SortKey>("date");
+  let sortDir = $state<"asc" | "desc">("desc");
+
+  function compareRows(a: (typeof sessionExplorer.rows)[number], b: (typeof sessionExplorer.rows)[number], key: SortKey): number {
+    switch (key) {
+      case "name":
+        return displayNameFor(a).toLowerCase().localeCompare(displayNameFor(b).toLowerCase());
+      case "date":
+        return (a.started_at ? Date.parse(a.started_at) : 0) - (b.started_at ? Date.parse(b.started_at) : 0);
+      case "cost":
+        return compareMoney(a.usage.cost, b.usage.cost);
+      case "total_tokens":
+        return a.usage.totalTokens - b.usage.totalTokens;
+      case "input_tokens":
+        return a.usage.inputTokens - b.usage.inputTokens;
+      case "output_tokens":
+        return a.usage.outputTokens - b.usage.outputTokens;
+      case "cache_write_tokens":
+        return a.usage.cacheCreationTokens - b.usage.cacheCreationTokens;
+      case "cache_read_tokens":
+        return a.usage.cacheReadTokens - b.usage.cacheReadTokens;
+    }
+  }
+
+  const sortedRows = $derived(
+    [...filteredRows].sort((a, b) => {
+      const cmp = compareRows(a, b, sortKey);
+      return sortDir === "asc" ? cmp : -cmp;
+    }),
+  );
+
+  function toggleSortDir(): void {
+    sortDir = sortDir === "asc" ? "desc" : "asc";
+  }
+
   const rows = $derived<SessionTreeNode[]>(
-    filteredRows.map((row) => ({
+    sortedRows.map((row) => ({
       kind: "session" as const,
       id: row.id,
       sessionId: row.id,
@@ -62,6 +113,8 @@
   );
 
   onMount(() => {
+    sessions.loadProjects();
+    sessions.loadAgents();
     // Seed filters from the Sessions page's current project/agent selection
     // so arriving here (e.g. via "View all sessions") carries over context.
     sessionExplorer.setFilters({
@@ -89,20 +142,20 @@
     </label>
     <label class="filter-field">
       <span>{m.session_explorer_filter_project()}</span>
-      <input
-        type="text"
+      <ProjectTypeahead
+        projects={sessions.projects}
         value={sessionExplorer.filters.project}
-        oninput={(e) => sessionExplorer.setFilters({ project: e.currentTarget.value })}
         placeholder={m.session_explorer_filter_project_placeholder()}
+        onselect={(v) => sessionExplorer.setFilters({ project: v })}
       />
     </label>
     <label class="filter-field">
       <span>{m.session_explorer_filter_agent()}</span>
-      <input
-        type="text"
+      <AgentTypeahead
+        agents={sessions.agents}
         value={sessionExplorer.filters.agent}
-        oninput={(e) => sessionExplorer.setFilters({ agent: e.currentTarget.value })}
         placeholder={m.session_explorer_filter_agent_placeholder()}
+        onselect={(v) => sessionExplorer.setFilters({ agent: v })}
       />
     </label>
     <label class="filter-field">
@@ -120,6 +173,33 @@
         value={sessionExplorer.filters.dateTo}
         oninput={(e) => sessionExplorer.setFilters({ dateTo: e.currentTarget.value })}
       />
+    </label>
+    <label class="filter-field">
+      <span>{m.session_explorer_sort_label()}</span>
+      <div class="sort-control">
+        <select
+          value={sortKey}
+          onchange={(e) => (sortKey = e.currentTarget.value as SortKey)}
+        >
+          <option value="date">{m.session_explorer_sort_date()}</option>
+          <option value="name">{m.session_explorer_sort_name()}</option>
+          <option value="cost">{m.session_explorer_sort_cost()}</option>
+          <option value="total_tokens">{m.session_explorer_sort_total_tokens()}</option>
+          <option value="input_tokens">{m.session_explorer_sort_input_tokens()}</option>
+          <option value="output_tokens">{m.session_explorer_sort_output_tokens()}</option>
+          <option value="cache_write_tokens">{m.session_explorer_sort_cache_write_tokens()}</option>
+          <option value="cache_read_tokens">{m.session_explorer_sort_cache_read_tokens()}</option>
+        </select>
+        <button
+          type="button"
+          class="sort-dir-btn"
+          onclick={toggleSortDir}
+          title={sortDir === "asc" ? m.session_explorer_sort_ascending() : m.session_explorer_sort_descending()}
+          aria-label={sortDir === "asc" ? m.session_explorer_sort_ascending() : m.session_explorer_sort_descending()}
+        >
+          {sortDir === "asc" ? "↑" : "↓"}
+        </button>
+      </div>
     </label>
   </div>
 
@@ -197,6 +277,42 @@
     background: var(--bg-inset);
     color: var(--text-primary);
     font-size: 12px;
+  }
+
+  .filter-field :global(.kit-typeahead) {
+    --typeahead-min-width: 160px;
+  }
+
+  .sort-control {
+    display: flex;
+    gap: 4px;
+  }
+
+  .sort-control select {
+    height: 26px;
+    padding: 0 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-muted);
+    background: var(--bg-inset);
+    color: var(--text-primary);
+    font-size: 12px;
+  }
+
+  .sort-dir-btn {
+    height: 26px;
+    width: 26px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-muted);
+    background: var(--bg-inset);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .sort-dir-btn:hover {
+    background: var(--bg-surface-hover);
   }
 
   .search-field {
