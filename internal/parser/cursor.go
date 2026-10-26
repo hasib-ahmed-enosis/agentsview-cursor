@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -114,11 +115,96 @@ func (p *cursorProvider) parseSession(
 	// A delegating transcript records only a Subagent tool_use block with a
 	// null id and no tool_result, so the subagents directory is the sole link
 	// from a child to the session that spawned it.
-	if loc, ok := cursorTranscriptLocationFromPath(path); ok && loc.ParentRawID != "" {
-		sess.ParentSessionID = cursorSessionIDPrefix + loc.ParentRawID
-		sess.RelationshipType = RelSubagent
+	if loc, ok := cursorTranscriptLocationFromPath(path); ok {
+		if loc.ParentRawID != "" {
+			sess.ParentSessionID = cursorSessionIDPrefix + loc.ParentRawID
+			sess.RelationshipType = RelSubagent
+		}
+		// This session's own subagents directory (if any) holds the
+		// transcripts of whatever it dispatched. Attaching
+		// SubagentSessionID here — regardless of whether this session is
+		// itself a top-level session or someone else's child — is what
+		// makes a subagent-of-subagent chain nest correctly: every parsed
+		// session runs this same check against its own raw id.
+		attachCursorSubagentDispatches(path, loc.RawID, &messages)
 	}
 	return sess, messages, nil
+}
+
+// attachCursorSubagentDispatches links every subagent transcript found under
+// this session's own subagents directory (agent-transcripts/<rawID>/subagents/)
+// to a ParsedToolCall in its message list, so GroupMessagesIntoPrompts
+// (internal/db/session_explorer.go) can attribute a dispatched child session
+// to the exact turn that spawned it instead of only via the best-effort
+// timestamp fallback (attachUnstampedSubagentSessions).
+//
+// Cursor's own dispatch tool_use block (name "Subagent") carries a null id
+// and no matching tool_result, so — unlike Claude Code's Task/Agent tool
+// correlated through toolUseResult.agentId — it cannot be matched to a
+// specific child by id. Unclaimed literal "Subagent" tool calls already on
+// the parsed messages are paired, in appearance order, with the discovered
+// subagent transcripts ordered by raw session id; this exact-count pairing
+// is deliberately conservative; a mismatch (or the legacy .txt transcript
+// format, which never emits a literal tool_use block at all) instead
+// synthesizes one minimal marker tool call per child, appended to the last
+// message, since no better anchor point is available.
+func attachCursorSubagentDispatches(path, rawID string, messages *[]ParsedMessage) {
+	if rawID == "" || messages == nil || len(*messages) == 0 {
+		return
+	}
+	transcriptsDir, ok := cursorTranscriptsDirFromPath(path)
+	if !ok {
+		return
+	}
+	subagentsDir := filepath.Join(transcriptsDir, rawID, cursorSubagentsDirName)
+	entries, err := cursorReadDir(subagentsDir)
+	if err != nil {
+		return
+	}
+	seen := make(map[string]string)
+	for _, entry := range entries {
+		if entry.IsDir() || !IsCursorTranscriptExt(entry.Name()) {
+			continue
+		}
+		cursorAddSeen(seen, entry.Name(), filepath.Join(subagentsDir, entry.Name()))
+	}
+	if len(seen) == 0 {
+		return
+	}
+	stems := make([]string, 0, len(seen))
+	for stem := range seen {
+		stems = append(stems, stem)
+	}
+	sort.Strings(stems)
+
+	type callRef struct{ msgIdx, callIdx int }
+	var literal []callRef
+	for mi := range *messages {
+		for ci := range (*messages)[mi].ToolCalls {
+			tc := (*messages)[mi].ToolCalls[ci]
+			if tc.ToolName == "Subagent" && tc.SubagentSessionID == "" {
+				literal = append(literal, callRef{mi, ci})
+			}
+		}
+	}
+
+	if len(literal) == len(stems) {
+		for i, stem := range stems {
+			ref := literal[i]
+			(*messages)[ref.msgIdx].ToolCalls[ref.callIdx].SubagentSessionID = cursorSessionIDPrefix + stem
+		}
+		return
+	}
+
+	lastIdx := len(*messages) - 1
+	for _, stem := range stems {
+		(*messages)[lastIdx].ToolCalls = append((*messages)[lastIdx].ToolCalls, ParsedToolCall{
+			ToolName:          "Subagent",
+			Category:          NormalizeToolCategory("Subagent"),
+			SubagentSessionID: cursorSessionIDPrefix + stem,
+		})
+	}
+	(*messages)[lastIdx].HasToolUse = true
 }
 
 // cursorBlock represents a raw block of lines between role

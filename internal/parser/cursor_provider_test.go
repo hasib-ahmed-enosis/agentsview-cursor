@@ -769,6 +769,134 @@ func TestCursorProviderParseLinksSubagentToParentSession(t *testing.T) {
 	}
 }
 
+// TestCursorProviderParseStampsSubagentDispatchOnParent proves the parent
+// side of subagent linkage: SubagentSessionID pointing at each child's real
+// "cursor:<rawID>" session id lands on a ParsedToolCall in the parent's own
+// message list, which is what lets GroupMessagesIntoPrompts (internal/db/
+// session_explorer.go) attribute a dispatched child to the exact turn that
+// spawned it instead of only the best-effort timestamp fallback. The fixture
+// transcript carries no literal "Subagent" tool_use block, so this also
+// exercises the synthesized-marker fallback path.
+func TestCursorProviderParseStampsSubagentDispatchOnParent(t *testing.T) {
+	f := newCursorSubagentFixture(t)
+	provider := f.newProvider(t)
+
+	sources, err := provider.Discover(t.Context())
+	require.NoError(t, err)
+	byPath := make(map[string]SourceRef, len(sources))
+	for _, source := range sources {
+		byPath[source.DisplayPath] = source
+	}
+
+	source, ok := byPath[f.parentJSONL]
+	require.True(t, ok)
+	outcome, err := provider.Parse(t.Context(), ParseRequest{Source: source})
+	require.NoError(t, err)
+	require.Len(t, outcome.Results, 1)
+
+	var dispatched []string
+	for _, m := range outcome.Results[0].Result.Messages {
+		for _, tc := range m.ToolCalls {
+			if tc.SubagentSessionID != "" {
+				dispatched = append(dispatched, tc.SubagentSessionID)
+				assert.Equal(t, "Subagent", tc.ToolName)
+				assert.Equal(t, "Task", tc.Category)
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{
+		"cursor:child-a", "cursor:child-b", "cursor:child-c",
+	}, dispatched)
+}
+
+// TestCursorProviderParseWithoutSubagentsDirUnaffected is the regression
+// check: a session with no subagents directory next to it must not get any
+// synthesized or stamped tool call.
+func TestCursorProviderParseWithoutSubagentsDirUnaffected(t *testing.T) {
+	root := t.TempDir()
+	projectDir := "Users-fiona-Documents-demo"
+	if filepath.Separator == '\\' {
+		projectDir = "C-Users-fiona-Documents-demo"
+	}
+	transcriptsDir := filepath.Join(root, projectDir, "agent-transcripts")
+	path := cursorProviderWriteJSONLTranscript(
+		t, transcriptsDir, "solo.jsonl", "no subagents here",
+	)
+
+	provider, ok := NewProvider(AgentCursor, ProviderConfig{Roots: []string{root}})
+	require.True(t, ok)
+
+	sources, err := provider.Discover(t.Context())
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	require.Equal(t, path, sources[0].DisplayPath)
+
+	outcome, err := provider.Parse(t.Context(), ParseRequest{Source: sources[0]})
+	require.NoError(t, err)
+	require.Len(t, outcome.Results, 1)
+
+	assert.Empty(t, outcome.Results[0].Result.Session.ParentSessionID)
+	assert.Equal(t, RelNone, outcome.Results[0].Result.Session.RelationshipType)
+	for _, m := range outcome.Results[0].Result.Messages {
+		for _, tc := range m.ToolCalls {
+			assert.Empty(t, tc.SubagentSessionID)
+		}
+	}
+}
+
+// TestCursorProviderParseStampsSubagentDispatchOnChildThatIsAlsoAParent
+// proves subagent-of-subagent nesting falls out of attachCursorSubagentDispatches
+// running for every parsed session: child-a (itself a subagent of "parent")
+// dispatches its own grandchild, discoverable at
+// agent-transcripts/child-a/subagents/grandchild.jsonl — a top-level entry
+// keyed by child-a's own raw id, sibling to "parent", per Cursor CLI's
+// one-level-deep subagent nesting.
+func TestCursorProviderParseStampsSubagentDispatchOnChildThatIsAlsoAParent(t *testing.T) {
+	f := newCursorSubagentFixture(t)
+	transcriptsDir := filepath.Join(f.root, f.projectDir, "agent-transcripts")
+	grandchild := cursorProviderWriteJSONLTranscript(
+		t, transcriptsDir, filepath.Join("child-a", "subagents", "grandchild.jsonl"),
+		"grandchild task",
+	)
+
+	provider := f.newProvider(t)
+	sources, err := provider.Discover(t.Context())
+	require.NoError(t, err)
+	byPath := make(map[string]SourceRef, len(sources))
+	for _, source := range sources {
+		byPath[source.DisplayPath] = source
+	}
+
+	// child-a's own transcript now doubles as a dispatching parent.
+	childSource, ok := byPath[f.childJSONL]
+	require.True(t, ok)
+	outcome, err := provider.Parse(t.Context(), ParseRequest{Source: childSource})
+	require.NoError(t, err)
+	require.Len(t, outcome.Results, 1)
+
+	var dispatched []string
+	for _, m := range outcome.Results[0].Result.Messages {
+		for _, tc := range m.ToolCalls {
+			if tc.SubagentSessionID != "" {
+				dispatched = append(dispatched, tc.SubagentSessionID)
+			}
+		}
+	}
+	assert.Equal(t, []string{"cursor:grandchild"}, dispatched)
+
+	// The grandchild transcript itself must still parse as its own session,
+	// linked to child-a via the existing path-derived mechanism.
+	grandchildSource, ok := byPath[grandchild]
+	require.True(t, ok)
+	grandchildOutcome, err := provider.Parse(t.Context(), ParseRequest{Source: grandchildSource})
+	require.NoError(t, err)
+	require.Len(t, grandchildOutcome.Results, 1)
+	grandchildSession := grandchildOutcome.Results[0].Result.Session
+	assert.Equal(t, "cursor:grandchild", grandchildSession.ID)
+	assert.Equal(t, "cursor:child-a", grandchildSession.ParentSessionID)
+	assert.Equal(t, RelSubagent, grandchildSession.RelationshipType)
+}
+
 func TestCursorDiscoveryPrefersTopLevelOverSubagentStem(t *testing.T) {
 	root := t.TempDir()
 	projectDir := "Users-fiona-Documents-demo"

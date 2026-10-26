@@ -592,6 +592,25 @@ func parseCursorTranscriptRelParts(parts []string) (cursorTranscriptLocation, bo
 	return loc, true
 }
 
+// cursorTranscriptsDirFromPath returns the "agent-transcripts" directory
+// enclosing path, walking upward without needing the projects root — the
+// same root-agnostic style as cursorTranscriptLocationFromPath, for callers
+// (parseSession) that only have the transcript's own absolute path.
+func cursorTranscriptsDirFromPath(path string) (string, bool) {
+	dir := filepath.Dir(path)
+	for i := 0; i < 4; i++ {
+		if filepath.Base(dir) == "agent-transcripts" {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
 func cursorTranscriptLocationInRoot(root, path string) (cursorTranscriptLocation, bool) {
 	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	if err != nil {

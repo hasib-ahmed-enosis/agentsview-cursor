@@ -259,19 +259,41 @@ func enrichCursorSessionFromTokenLog(
 	if !IsValidSessionID(agentID) {
 		return nil
 	}
+	return enrichSessionFromCursorTokenLogByID(agentID, transcriptPath, cwd, msgs)
+}
+
+// enrichSessionFromCursorTokenLogByID is enrichCursorSessionFromTokenLog's
+// shared worker, taking the session's own ID directly instead of deriving
+// it from a CLI transcript file path. Cursor IDE composers (see
+// cursor_ide.go) have no on-disk transcript file to derive an ID from --
+// the composer UUID itself is the hook log's conversation_id -- so they
+// call this with transcriptPath == "", which cursorTokenLogRowMatchesSession
+// already treats as "skip the transcript-path checks, keep the ID and
+// workspace-root ones".
+func matchedCursorTokenLogRows(agentID, transcriptPath, cwd string) ([]cursorTokenLogRow, error) {
+	if !IsValidSessionID(agentID) {
+		return nil, nil
+	}
 	allRows, err := loadCursorTokenLogRows(cwd)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(allRows) == 0 {
-		return nil
-	}
-
 	var matched []cursorTokenLogRow
 	for _, row := range allRows {
 		if cursorTokenLogRowMatchesSession(row, agentID, transcriptPath, cwd) {
 			matched = append(matched, row)
 		}
+	}
+	return matched, nil
+}
+
+func enrichSessionFromCursorTokenLogByID(
+	agentID, transcriptPath, cwd string,
+	msgs []ParsedMessage,
+) error {
+	matched, err := matchedCursorTokenLogRows(agentID, transcriptPath, cwd)
+	if err != nil {
+		return err
 	}
 	if len(matched) == 0 {
 		return nil
@@ -312,6 +334,68 @@ func enrichCursorSessionFromTokenLog(
 			&msgs[assistantIdx[len(assistantIdx)-1]],
 			stopRows[len(stopRows)-1],
 		)
+	}
+	return nil
+}
+
+// enrichCursorIDESessionFromTokenLog is enrichSessionFromCursorTokenLogByID's
+// counterpart for Cursor IDE composers, which cannot use that function's
+// positional "i-th usage row -> i-th assistant message" pairing: a CLI
+// transcript message is roughly one per full agent turn, but a Cursor IDE
+// composer bubble is one per rendered step -- often several per turn (one
+// per inline tool call, see cursorIDEBubble.ToolFormerData) -- so pairing by
+// position would misattribute a turn's usage onto an unrelated bubble the
+// moment any earlier turn had a different bubble count than the hook log
+// recorded requests for it.
+//
+// Instead this matches by identity: a bubble whose own requestId is
+// non-empty starts a new generation (observed empty on every other bubble
+// in that generation), and equals the hook log row's generation_id for that
+// same request -- so requestIDs[i], aligned 1:1 with msgs by index, is
+// looked up directly against each row's GenerationID rather than counted
+// against a positional cursor into msgs.
+func enrichCursorIDESessionFromTokenLog(
+	agentID, cwd string,
+	msgs []ParsedMessage,
+	requestIDs []string,
+) error {
+	matched, err := matchedCursorTokenLogRows(agentID, "", cwd)
+	if err != nil {
+		return err
+	}
+	if len(matched) == 0 {
+		return nil
+	}
+
+	byGeneration := make(map[string]cursorTokenLogRow, len(matched))
+	for _, row := range matched {
+		genID := strings.TrimSpace(row.GenerationID)
+		if genID == "" || !cursorTokenLogRowHasUsage(row) {
+			continue
+		}
+		// Prefer the first usage-carrying row seen for a generation
+		// (afterAgentResponse typically precedes stop's duplicate figures
+		// in recorded_at order thanks to the caller's own append order);
+		// either carries the same totals when both are present.
+		if _, exists := byGeneration[genID]; !exists {
+			byGeneration[genID] = row
+		}
+	}
+	if len(byGeneration) == 0 {
+		return nil
+	}
+
+	for i := range msgs {
+		if i >= len(requestIDs) {
+			break
+		}
+		reqID := strings.TrimSpace(requestIDs[i])
+		if reqID == "" {
+			continue
+		}
+		if row, ok := byGeneration[reqID]; ok {
+			applyCursorHookTokens(&msgs[i], row)
+		}
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -128,6 +129,17 @@ type cursorIDEWorkspaceIdentifier struct {
 	} `json:"uri"`
 }
 
+// cursorIDESubagentInfo is set on a composer that Cursor's own agent
+// dispatched as a subagent of another composer (via the Task tool). Unlike
+// the top-level `subComposerIds` field (observed always empty, apparently
+// reserved for "Best of N" parallel runs rather than actual subagent
+// dispatch), this is the authoritative parent link: it is stamped on the
+// *child* composer, not gathered from a list on the parent.
+type cursorIDESubagentInfo struct {
+	ParentComposerID string `json:"parentComposerId"`
+	SubagentTypeName string `json:"subagentTypeName"`
+}
+
 // cursorIDEComposerDoc is the composerData:<uuid> document. Only the fields
 // the parser needs are modeled; the rest of the blob (rich editor state,
 // capability flags, encryption keys for Cursor's own cloud sync, ...) is
@@ -139,6 +151,7 @@ type cursorIDEComposerDoc struct {
 	LastUpdatedAt       int64                        `json:"lastUpdatedAt"`
 	WorkspaceIdentifier cursorIDEWorkspaceIdentifier `json:"workspaceIdentifier"`
 	TrackedGitRepos     []cursorIDEGitRepo           `json:"trackedGitRepos"`
+	SubagentInfo        *cursorIDESubagentInfo       `json:"subagentInfo"`
 }
 
 // cursorIDEComposerMeta is a per-composer descriptor for the engine's
@@ -282,6 +295,13 @@ type cursorIDEBubble struct {
 	Text           string                   `json:"text"`
 	CreatedAt      string                   `json:"createdAt"`
 	ToolFormerData *cursorIDEToolFormerData `json:"toolFormerData"`
+	// RequestID is non-empty only on the bubble that started a new agent
+	// generation (empty on every later bubble within that same
+	// generation, e.g. its inline tool-call steps); it equals the
+	// agentsview Cursor hook's generation_id for that request, and is the
+	// only reliable key for attributing that generation's token usage
+	// (see enrichCursorIDESessionFromTokenLog).
+	RequestID string `json:"requestId"`
 }
 
 func cursorIDEToolResultText(v jsontext.Value) string {
@@ -466,6 +486,19 @@ func parseCursorIDEComposer(
 	}
 
 	var messages []ParsedMessage
+	// requestIDs is aligned 1:1 with messages by index (append kept in
+	// lockstep below); see enrichCursorIDESessionFromTokenLog. Cursor
+	// stamps a fresh requestId on the bubble that OPENS a generation
+	// (observed on that generation's own user bubble, not its assistant
+	// response), leaving every later bubble in that same generation --
+	// including the assistant bubble(s) that actually answer it -- with an
+	// empty one. pendingRequestID carries that value forward and attaches
+	// it to exactly the next assistant message (then clears), so a
+	// generation's usage lands on one bubble instead of being silently
+	// dropped (requestId is on a non-assistant bubble applyCursorHookTokens
+	// ignores) or duplicated across every intermediate tool-call bubble.
+	var requestIDs []string
+	pendingRequestID := ""
 	truncated := false
 	for _, header := range doc.Headers {
 		if err := ctx.Err(); err != nil {
@@ -509,10 +542,34 @@ func parseCursorIDEComposer(
 		// truncation guard compares it against the archived messages so a
 		// gap transcript can never drop archived content unnoticed.
 		msg.SourceUUID = header.BubbleID
+		if bubble.RequestID != "" {
+			pendingRequestID = bubble.RequestID
+		}
+		reqID := ""
+		if msg.Role == RoleAssistant && pendingRequestID != "" {
+			reqID = pendingRequestID
+			pendingRequestID = ""
+		}
 		messages = append(messages, msg)
+		requestIDs = append(requestIDs, reqID)
 	}
 	if len(messages) == 0 {
 		return nil, nil
+	}
+
+	cwd := cursorIDECwd(doc)
+	// Cursor IDE composers carry no per-message token usage of their own
+	// (see cursorIDEComposerDoc's doc comment); the agentsview Cursor hook
+	// (internal/cursorhook) is the only source for it, keyed by this
+	// composer's own ID as the hook's conversation_id and each bubble's own
+	// requestId as the hook's generation_id (see
+	// enrichCursorIDESessionFromTokenLog).
+	if tokenLogErr := enrichCursorIDESessionFromTokenLog(composerID, cwd, messages, requestIDs); tokenLogErr != nil {
+		if errors.Is(tokenLogErr, context.Canceled) ||
+			errors.Is(tokenLogErr, context.DeadlineExceeded) {
+			return nil, tokenLogErr
+		}
+		log.Printf("warning: cursor IDE token log: %v", tokenLogErr)
 	}
 
 	var firstMessage string
@@ -549,7 +606,6 @@ func parseCursorIDEComposer(
 	if err != nil {
 		return nil, err
 	}
-	cwd := cursorIDECwd(doc)
 	sess := ParsedSession{
 		ID:               cursorIDEIDPrefix + composerID,
 		Agent:            AgentCursorIDE,
@@ -571,6 +627,16 @@ func parseCursorIDEComposer(
 			Hash:  digest,
 		},
 	}
+	if doc.SubagentInfo != nil && doc.SubagentInfo.ParentComposerID != "" {
+		// This composer is itself a Task-tool subagent Cursor's own agent
+		// dispatched from another composer. subComposerIds (observed always
+		// empty, apparently reserved for "Best of N" parallel runs) never
+		// carries this link, so it has to come from the child's own
+		// subagentInfo instead.
+		sess.ParentSessionID = cursorIDEIDPrefix + doc.SubagentInfo.ParentComposerID
+		sess.RelationshipType = RelSubagent
+	}
+	accumulateMessageTokenUsage(&sess, messages)
 
 	return &ParseResult{Session: sess, Messages: messages}, nil
 }

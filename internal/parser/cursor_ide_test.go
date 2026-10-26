@@ -24,6 +24,9 @@ type cursorIDETestBubble struct {
 	createdAt  string
 	tool       *cursorIDEToolFormerData
 	raw        []byte
+	// requestID, when set, is this bubble's own requestId -- the hook
+	// log's generation_id for the generation it started.
+	requestID string
 }
 
 // cursorIDETestComposer is one synthetic composerData document plus its
@@ -42,6 +45,10 @@ type cursorIDETestComposer struct {
 	// parser must tolerate a header pointing at a row Cursor never wrote or
 	// later wiped.
 	omitBubbleIDs map[string]bool
+	// parentComposerID, when set, writes this composer's subagentInfo to
+	// mark it as a Task-tool subagent dispatched by the named parent
+	// composer ID (unprefixed, matching Cursor's own on-disk convention).
+	parentComposerID string
 }
 
 func createCursorIDEDB(t *testing.T, composers []cursorIDETestComposer) string {
@@ -70,6 +77,9 @@ func createCursorIDEDB(t *testing.T, composers []cursorIDETestComposer) string {
 			CreatedAt:     c.createdAt,
 			LastUpdatedAt: c.updatedAt,
 		}
+		if c.parentComposerID != "" {
+			doc.SubagentInfo = &cursorIDESubagentInfo{ParentComposerID: c.parentComposerID}
+		}
 		doc.WorkspaceIdentifier.URI.FSPath = c.cwd
 		if c.repoPath != "" {
 			doc.TrackedGitRepos = []cursorIDEGitRepo{{
@@ -93,7 +103,7 @@ func createCursorIDEDB(t *testing.T, composers []cursorIDETestComposer) string {
 			}
 			bubble := cursorIDEBubble{
 				Type: b.bubbleType, Text: b.text, CreatedAt: b.createdAt,
-				ToolFormerData: b.tool,
+				ToolFormerData: b.tool, RequestID: b.requestID,
 			}
 			raw, err := json.Marshal(bubble)
 			require.NoError(t, err)
@@ -382,6 +392,123 @@ func TestParseCursorIDEComposer_ResultValues(t *testing.T) {
 			t.Logf("preserved text=%s ContentRaw=%s bytes=%d", DecodeContent(tr.ContentRaw), tr.ContentRaw, tr.ContentLength)
 		})
 	}
+}
+
+// TestParseCursorIDEComposer_SubagentInfoSetsParentLink covers the actual
+// on-disk subagent linkage: a composer with a non-empty subagentInfo.
+// parentComposerId is itself a Task-tool subagent dispatched by that parent,
+// and must come out of the parser with ParentSessionID/RelationshipType set
+// accordingly (subComposerIds, by contrast, is never populated for this and
+// is not read).
+func TestParseCursorIDEComposer_SubagentInfoSetsParentLink(t *testing.T) {
+	dbPath := createCursorIDEDB(t, []cursorIDETestComposer{{
+		id:               "child-1",
+		parentComposerID: "parent-1",
+		bubbles:          []cursorIDETestBubble{{id: "b0", bubbleType: 1, text: "explore the repo"}},
+	}})
+	conn, err := openCursorIDEDB(dbPath)
+	require.NoError(t, err)
+	defer conn.Close()
+	info, err := os.Stat(dbPath)
+	require.NoError(t, err)
+
+	result, err := parseCursorIDEComposer(t.Context(), conn, dbPath, "child-1", "test", info)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, cursorIDEIDPrefix+"parent-1", result.Session.ParentSessionID, "ParentSessionID")
+	assert.Equal(t, RelSubagent, result.Session.RelationshipType, "RelationshipType")
+}
+
+// TestParseCursorIDEComposer_NoSubagentInfoLeavesNoParentLink is the
+// counterpart: a root composer (no subagentInfo at all) must not get a
+// ParentSessionID/RelationshipType from this path.
+func TestParseCursorIDEComposer_NoSubagentInfoLeavesNoParentLink(t *testing.T) {
+	dbPath := createCursorIDEDB(t, []cursorIDETestComposer{{
+		id:      "root-1",
+		bubbles: []cursorIDETestBubble{{id: "b0", bubbleType: 1, text: "hi"}},
+	}})
+	conn, err := openCursorIDEDB(dbPath)
+	require.NoError(t, err)
+	defer conn.Close()
+	info, err := os.Stat(dbPath)
+	require.NoError(t, err)
+
+	result, err := parseCursorIDEComposer(t.Context(), conn, dbPath, "root-1", "test", info)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Empty(t, result.Session.ParentSessionID, "ParentSessionID")
+	assert.Empty(t, result.Session.RelationshipType, "RelationshipType")
+}
+
+// TestParseCursorIDEComposer_AppliesCursorHookTokenLog covers the token gap
+// this parser otherwise has: cursorDiskKV never stores per-message usage for
+// Cursor IDE composers (only aggregate cost-in-cents, see cursorIDEComposerDoc),
+// so the agentsview Cursor hook's global cursor-hook-usage.jsonl is the only
+// source. Matching is by identity, not position: Cursor stamps a fresh
+// requestId on the USER bubble that opens a generation, not on the
+// assistant bubble(s) that answer it (confirmed against a real state.vscdb
+// -- see cursorIDEBubble.RequestID), and a generation can span several
+// assistant bubbles (one per inline tool-call step, each with no requestId
+// of its own). The second generation's usage must land on ITS OWN first
+// assistant bubble, not spill onto the first generation's tail the way a
+// naive "i-th usage row -> i-th assistant bubble" pairing would, and must
+// not be duplicated onto every assistant bubble in between.
+func TestParseCursorIDEComposer_AppliesCursorHookTokenLog(t *testing.T) {
+	cwd := t.TempDir()
+	dir := t.TempDir()
+	t.Setenv("AGENTSVIEW_DATA_DIR", dir)
+	logPath := filepath.Join(dir, cursorHookUsageFileName)
+	require.NoError(t, os.WriteFile(logPath, []byte(
+		`{"recorded_at":"2026-09-15T10:00:00Z","hook_event_name":"afterAgentResponse","conversation_id":"hooked-1","generation_id":"gen-1","input_tokens":1000,"output_tokens":50,"cache_read_tokens":200,"cache_write_tokens":0,"workspace_root":"`+filepath.ToSlash(cwd)+`"}`+"\n"+
+			`{"recorded_at":"2026-09-15T10:05:00Z","hook_event_name":"afterAgentResponse","conversation_id":"hooked-1","generation_id":"gen-2","input_tokens":3000,"output_tokens":80,"cache_read_tokens":400,"cache_write_tokens":0,"workspace_root":"`+filepath.ToSlash(cwd)+`"}`+"\n",
+	), 0o644))
+
+	dbPath := createCursorIDEDB(t, []cursorIDETestComposer{{
+		id:  "hooked-1",
+		cwd: cwd,
+		bubbles: []cursorIDETestBubble{
+			// Generation 1: the opening user bubble carries requestId
+			// "gen-1"; its assistant response has an inline tool-call step
+			// (a second assistant bubble) with no requestId of its own,
+			// exactly like a real transcript.
+			{id: "b0", bubbleType: cursorIDEBubbleTypeUser, text: "hi", requestID: "gen-1"},
+			{id: "b1", bubbleType: cursorIDEBubbleTypeAssistant, text: "hello"},
+			{id: "b2", bubbleType: cursorIDEBubbleTypeAssistant, text: "using a tool"},
+			// Generation 2: a fresh requestId on its own opening user
+			// bubble. A positional pairing would wrongly hand this
+			// generation's row to "using a tool" (the 2nd assistant bubble
+			// overall) instead of the assistant bubble that actually
+			// answers this second ask.
+			{id: "b3", bubbleType: cursorIDEBubbleTypeUser, text: "again", requestID: "gen-2"},
+			{id: "b4", bubbleType: cursorIDEBubbleTypeAssistant, text: "done"},
+		},
+	}})
+	conn, err := openCursorIDEDB(dbPath)
+	require.NoError(t, err)
+	defer conn.Close()
+	info, err := os.Stat(dbPath)
+	require.NoError(t, err)
+
+	result, err := parseCursorIDEComposer(t.Context(), conn, dbPath, "hooked-1", "test", info)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Messages, 5)
+
+	gen1 := result.Messages[1]
+	assert.True(t, gen1.HasOutputTokens, "gen1.HasOutputTokens")
+	assert.Equal(t, 50, gen1.OutputTokens, "gen1.OutputTokens")
+	assert.Contains(t, string(gen1.TokenUsage), `"input_tokens":1000`)
+
+	toolStep := result.Messages[2]
+	assert.False(t, toolStep.HasOutputTokens, "toolStep (no requestId) should get no usage")
+
+	gen2 := result.Messages[4]
+	assert.True(t, gen2.HasOutputTokens, "gen2.HasOutputTokens")
+	assert.Equal(t, 80, gen2.OutputTokens, "gen2.OutputTokens")
+	assert.Contains(t, string(gen2.TokenUsage), `"input_tokens":3000`)
+
+	assert.True(t, result.Session.HasTotalOutputTokens, "Session.HasTotalOutputTokens")
+	assert.Equal(t, 130, result.Session.TotalOutputTokens, "Session.TotalOutputTokens")
 }
 
 func TestParseCursorIDEComposer_MalformedResult(t *testing.T) {
