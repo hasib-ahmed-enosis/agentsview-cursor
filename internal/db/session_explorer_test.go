@@ -271,6 +271,37 @@ func TestMessageUsageTotals_SkipsMessagesWithoutUsableTokenUsage(t *testing.T) {
 	assert.Equal(t, PromptUsage{DurationSeconds: 5}, totals, "totals for unusable token usage")
 }
 
+// TestMessageUsageTotals_HasUsageDataFalseWhenNoMessageCarriesUsage covers
+// a provider (like Cursor) that never records per-message token usage at
+// all: the frontend needs to tell "unknown" apart from "genuinely zero".
+func TestMessageUsageTotals_HasUsageDataFalseWhenNoMessageCarriesUsage(t *testing.T) {
+	resolver := export.NewPricingResolver(nil)
+	messages := []Message{
+		{SessionID: "s1", Ordinal: 0, Timestamp: "2024-06-15T10:00:00Z"},
+		{SessionID: "s1", Ordinal: 1, Timestamp: "2024-06-15T10:00:05Z"},
+	}
+	totals, err := messageUsageTotals(messages, resolver)
+	requireNoError(t, err, "messageUsageTotals")
+	assert.False(t, totals.HasUsageData, "HasUsageData should be false when no message carries a token payload")
+}
+
+// TestMessageUsageTotals_HasUsageDataTrueWhenAMessageCarriesUsage is the
+// counterpart: any message with a parseable (even all-zero) token payload
+// marks the node's usage as known rather than unknown.
+func TestMessageUsageTotals_HasUsageDataTrueWhenAMessageCarriesUsage(t *testing.T) {
+	resolver := export.NewPricingResolver(nil)
+	messages := []Message{
+		{SessionID: "s1", Ordinal: 0, Timestamp: "2024-06-15T10:00:00Z"},
+		{
+			SessionID: "s1", Ordinal: 1, Timestamp: "2024-06-15T10:00:05Z",
+			TokenUsage: jsontext.Value(`{"input_tokens":10,"output_tokens":5}`),
+		},
+	}
+	totals, err := messageUsageTotals(messages, resolver)
+	requireNoError(t, err, "messageUsageTotals")
+	assert.True(t, totals.HasUsageData, "HasUsageData should be true once any message carries a token payload")
+}
+
 func TestGetSessionPrompts_AttributesAndResolvesSubSessionMetadata(t *testing.T) {
 	d := testDB(t)
 	ctx := t.Context()
@@ -314,6 +345,79 @@ func TestGetSessionPrompts_AttributesAndResolvesSubSessionMetadata(t *testing.T)
 	assert.Equal(t, "explore", sub.DisplayName, "sub.DisplayName")
 	assert.Equal(t, "2024-06-15T10:00:06Z", sub.StartedAt, "sub.StartedAt")
 	assert.Equal(t, "subagent", sub.RelationshipType, "sub.RelationshipType")
+}
+
+// TestGetSessionPrompts_AttachesUnstampedSubagentSession covers a provider
+// (like Cursor) that links a subagent session to its parent via
+// parent_session_id/relationship_type but never stamps the dispatching
+// tool call's SubagentSessionID — the only signal GroupMessagesIntoPrompts
+// otherwise looks at. Without the fallback, this subagent would never
+// appear in the explorer tree at all.
+func TestGetSessionPrompts_AttachesUnstampedSubagentSession(t *testing.T) {
+	d := testDB(t)
+	ctx := t.Context()
+
+	insertSession(t, d, "root-1", "proj-a", func(s *Session) {
+		s.Agent = "cursor"
+		s.StartedAt = Ptr("2024-06-15T10:00:00Z")
+	})
+	insertMessages(t, d,
+		Message{SessionID: "root-1", Ordinal: 0, Role: "user", Timestamp: "2024-06-15T10:00:00Z", Content: "explore the repo"},
+		Message{SessionID: "root-1", Ordinal: 1, Role: "assistant", Timestamp: "2024-06-15T10:00:05Z"},
+	)
+	insertSession(t, d, "sub-1", "proj-a", func(s *Session) {
+		s.Agent = "cursor"
+		s.SessionName = Ptr("explore")
+		s.StartedAt = Ptr("2024-06-15T10:00:06Z")
+		s.ParentSessionID = Ptr("root-1")
+		s.RelationshipType = "subagent"
+	})
+	insertMessages(t, d,
+		Message{SessionID: "sub-1", Ordinal: 0, Role: "user", Timestamp: "2024-06-15T10:00:06Z"},
+	)
+
+	prompts, err := d.GetSessionPrompts(ctx, "root-1")
+	requireNoError(t, err, "GetSessionPrompts")
+
+	require.Len(t, prompts, 1, "prompts")
+	require.Len(t, prompts[0].SubSessions, 1, "prompts[0].SubSessions")
+	sub := prompts[0].SubSessions[0]
+	assert.Equal(t, "sub-1", sub.SessionID, "sub.SessionID")
+	assert.Equal(t, "explore", sub.DisplayName, "sub.DisplayName")
+	assert.Equal(t, "subagent", sub.RelationshipType, "sub.RelationshipType")
+}
+
+// TestGetSessionPrompts_DoesNotDoubleAttachStampedSubagentSession ensures
+// the unstamped-subagent fallback never duplicates a sub-session that
+// GroupMessagesIntoPrompts already attributed via an explicit Task-tool
+// SubagentSessionID stamp.
+func TestGetSessionPrompts_DoesNotDoubleAttachStampedSubagentSession(t *testing.T) {
+	d := testDB(t)
+	ctx := t.Context()
+
+	insertSession(t, d, "root-1", "proj-a")
+	insertMessages(t, d,
+		Message{SessionID: "root-1", Ordinal: 0, Role: "user", Timestamp: "t0"},
+		Message{
+			SessionID: "root-1", Ordinal: 1, Role: "assistant", Timestamp: "t1",
+			ToolCalls: []ToolCall{{
+				ToolName: "Task", ToolUseID: "tu1", SubagentSessionID: "sub-1",
+				InputJSON: `{"subagent_type":"Explore"}`,
+			}},
+		},
+	)
+	insertSession(t, d, "sub-1", "proj-a", func(s *Session) {
+		s.ParentSessionID = Ptr("root-1")
+		s.RelationshipType = "subagent"
+	})
+	insertMessages(t, d,
+		Message{SessionID: "sub-1", Ordinal: 0, Role: "user", Timestamp: "t2"},
+	)
+
+	prompts, err := d.GetSessionPrompts(ctx, "root-1")
+	requireNoError(t, err, "GetSessionPrompts")
+	require.Len(t, prompts, 1, "prompts")
+	require.Len(t, prompts[0].SubSessions, 1, "prompts[0].SubSessions should not be duplicated")
 }
 
 func TestGetSessionPrompts_RecursionDepthTwo(t *testing.T) {

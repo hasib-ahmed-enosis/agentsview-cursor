@@ -76,6 +76,15 @@ type PromptUsage struct {
 	TotalTokens         int         `json:"totalTokens"`
 	Cost                money.Money `json:"cost"`
 	DurationSeconds     float64     `json:"durationSeconds"`
+	// HasUsageData is false when none of this node's own messages (nor any
+	// descendant's) ever reported a non-zero token counter. Some providers
+	// (e.g. Cursor) never record per-message usage at all, so their totals
+	// are unknown rather than genuinely zero; the frontend renders that
+	// distinction as "x" instead of "0". A node whose messages all report
+	// real, legitimately all-zero usage is indistinguishable from this and
+	// also renders as "x" — an acceptable trade-off since that case is rare
+	// (a real response essentially always reports positive output tokens).
+	HasUsageData bool `json:"hasUsageData"`
 }
 
 // addUsageTotals sums two PromptUsage. Cost addition can only fail on
@@ -94,6 +103,7 @@ func addUsageTotals(a, b PromptUsage) (PromptUsage, error) {
 		TotalTokens:         a.TotalTokens + b.TotalTokens,
 		Cost:                cost,
 		DurationSeconds:     a.DurationSeconds + b.DurationSeconds,
+		HasUsageData:        a.HasUsageData || b.HasUsageData,
 	}, nil
 }
 
@@ -111,6 +121,7 @@ func messageUsageTotals(messages []Message, resolver *export.PricingResolver) (P
 		if inputTok == 0 && outputTok == 0 && cacheCrTok == 0 && cacheRdTok == 0 {
 			continue
 		}
+		totals.HasUsageData = true
 		cache1hTok := clampedCacheCreation1hTokens(tokenJSON)
 		_, lookup := resolver.ResolveAt(
 			m.Model, usageLookupModel(m.Model, m.Timestamp), usagePricingTimestamp(m.Timestamp),
@@ -211,6 +222,52 @@ func isRealUserTurn(m Message) bool {
 	return m.Role == "user" && m.SourceSubtype != "tool_result"
 }
 
+// attachUnstampedSubagentSessions appends a SubSessionRef for any child
+// session linked via parent_session_id/relationship_type "subagent" that
+// GroupMessagesIntoPrompts didn't already attribute to a Prompt through an
+// explicit dispatching tool call (a non-empty ToolCall.SubagentSessionID).
+// Some providers (e.g. Cursor) link a subagent session to its parent but
+// never stamp the dispatching tool call itself, so without this fallback
+// their subagents would never appear in the explorer tree at all. Each such
+// child is attributed to the last Prompt whose StartedAt does not come
+// after the child's own StartedAt (falling back to the first Prompt), since
+// there is no dispatching tool call to pin it to an exact turn.
+func attachUnstampedSubagentSessions(prompts []PromptNode, children []Session) {
+	if len(prompts) == 0 || len(children) == 0 {
+		return
+	}
+	stamped := make(map[string]bool)
+	for _, p := range prompts {
+		for _, ref := range p.SubSessions {
+			stamped[ref.SessionID] = true
+		}
+	}
+	promptTimes := make([]time.Time, len(prompts))
+	for i, p := range prompts {
+		if ts, err := time.Parse(time.RFC3339Nano, p.StartedAt); err == nil {
+			promptTimes[i] = ts
+		}
+	}
+	for _, child := range children {
+		if child.RelationshipType != "subagent" || stamped[child.ID] {
+			continue
+		}
+		target := 0
+		if child.StartedAt != nil {
+			if childTime, err := time.Parse(time.RFC3339Nano, *child.StartedAt); err == nil {
+				for i, pt := range promptTimes {
+					if !pt.IsZero() && !pt.After(childTime) {
+						target = i
+					}
+				}
+			}
+		}
+		prompts[target].SubSessions = append(
+			prompts[target].SubSessions, SubSessionRef{SessionID: child.ID},
+		)
+	}
+}
+
 // taskToolInput is the shape of a Task tool call's input JSON relevant to
 // sub-agent attribution, mirroring the fields formatTask (internal/parser/
 // content.go) already reads for the rendered "[Task: ...]" label.
@@ -294,6 +351,12 @@ func sessionPromptsWithUsageVisited(
 		return nil, fmt.Errorf("getting messages for %s: %w", sessionID, err)
 	}
 	prompts := GroupMessagesIntoPrompts(messages)
+
+	children, err := store.GetChildSessions(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading child sessions for %s: %w", sessionID, err)
+	}
+	attachUnstampedSubagentSessions(prompts, children)
 
 	for i := range prompts {
 		ownUsage, err := messageUsageTotals(prompts[i].messages, resolver)
