@@ -108,9 +108,70 @@
         cacheWrite: row.usage.cacheCreationTokens,
         cacheRead: row.usage.cacheReadTokens,
         total: row.usage.totalTokens,
+        hasUsageData: row.usage.hasUsageData,
       },
     })),
   );
+
+  // Export the rows currently shown (after search + sort), as CSV or JSON.
+  let exportOpen = $state(false);
+
+  function download(filename: string, mime: string, content: string): void {
+    const url = URL.createObjectURL(new Blob([content], { type: mime }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function csvCell(value: unknown): string {
+    let s = String(value ?? "");
+    // Neutralise spreadsheet formula injection.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function exportRows(format: "csv" | "json"): void {
+    exportOpen = false;
+    const data = sortedRows.map((row) => ({
+      id: row.id,
+      name: displayNameFor(row),
+      project: row.project,
+      agent: row.agent,
+      started_at: row.started_at ?? "",
+      relationship_type: row.relationship_type ?? "",
+      cost: row.usage.cost,
+      total_tokens: row.usage.totalTokens,
+      input_tokens: row.usage.inputTokens,
+      output_tokens: row.usage.outputTokens,
+      cache_write_tokens: row.usage.cacheCreationTokens,
+      cache_read_tokens: row.usage.cacheReadTokens,
+    }));
+    const stamp = new Date().toISOString().slice(0, 10);
+    if (format === "json") {
+      download(`session-explorer-${stamp}.json`, "application/json", JSON.stringify(data, null, 2));
+      return;
+    }
+    const headers = Object.keys(data[0] ?? {
+      id: 0, name: 0, project: 0, agent: 0, started_at: 0, relationship_type: 0, cost: 0,
+      total_tokens: 0, input_tokens: 0, output_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 0,
+    });
+    const lines = [
+      headers.join(","),
+      ...data.map((d) =>
+        headers
+          .map((h) => {
+            const v = (d as Record<string, unknown>)[h];
+            return csvCell(typeof v === "object" && v !== null ? JSON.stringify(v) : v);
+          })
+          .join(","),
+      ),
+    ];
+    download(`session-explorer-${stamp}.csv`, "text/csv;charset=utf-8", "﻿" + lines.join("\r\n"));
+  }
 
   onMount(() => {
     sessions.loadProjects();
@@ -128,6 +189,24 @@
   <div class="explorer-header">
     <h2 class="explorer-title">{m.session_explorer_title()}</h2>
     <span class="explorer-total">{m.session_explorer_total_sessions({ count: sessionExplorer.total })}</span>
+    <div class="export-menu">
+      <button
+        type="button"
+        class="export-btn"
+        disabled={sortedRows.length === 0}
+        aria-haspopup="menu"
+        aria-expanded={exportOpen}
+        onclick={() => (exportOpen = !exportOpen)}
+      >
+        {m.session_explorer_export()} ▾
+      </button>
+      {#if exportOpen}
+        <div class="export-dropdown" role="menu">
+          <button type="button" role="menuitem" onclick={() => exportRows("csv")}>{m.session_explorer_export_csv()}</button>
+          <button type="button" role="menuitem" onclick={() => exportRows("json")}>{m.session_explorer_export_json()}</button>
+        </div>
+      {/if}
+    </div>
   </div>
 
   <div class="explorer-filters">
@@ -253,6 +332,48 @@
   .explorer-total {
     font-size: 12px;
     color: var(--text-muted);
+  }
+
+  .export-menu {
+    position: relative;
+    margin-left: auto;
+  }
+
+  .export-btn,
+  .export-dropdown button {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-muted);
+    background: var(--bg-inset);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .export-btn:disabled {
+    opacity: var(--opacity-disabled);
+    cursor: default;
+  }
+
+  .export-btn:hover:not(:disabled),
+  .export-dropdown button:hover {
+    background: var(--bg-surface-hover);
+  }
+
+  .export-dropdown {
+    position: absolute;
+    right: 0;
+    top: 30px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-default);
+    background: var(--bg-surface);
   }
 
   .explorer-filters {

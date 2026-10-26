@@ -31,6 +31,7 @@
     LogsIcon,
     PencilIcon,
     PinIcon,
+    SearchIcon,
     TrashIcon,
   } from "../../icons.js";
 
@@ -247,6 +248,14 @@
       >
         <Grid2x2Icon size="12" strokeWidth="2" aria-hidden="true" />
         {m.nav_usage()}
+      </button>
+      <button
+        class="mobile-nav-btn"
+        class:active={router.route === "session-explorer"}
+        onclick={() => mobileNav("session-explorer")}
+      >
+        <SearchIcon size="12" strokeWidth="2" aria-hidden="true" />
+        {m.nav_session_explorer()}
       </button>
       <button
         class="mobile-nav-btn"
