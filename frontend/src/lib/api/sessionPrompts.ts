@@ -23,6 +23,14 @@ export interface PromptUsage {
   totalTokens: number;
   cost: Money;
   durationSeconds: number;
+  // False when none of this node's own messages (nor any descendant's)
+  // ever carried a parseable token-usage payload at all — as opposed to a
+  // node whose messages reported genuinely zero tokens. Some providers
+  // (e.g. Cursor) never record per-message usage, so their totals are
+  // unknown rather than zero. Optional/absent is treated as true (has
+  // data) so fixtures/callers that predate this field keep behaving as
+  // before.
+  hasUsageData?: boolean;
 }
 
 export interface SubSessionRef {

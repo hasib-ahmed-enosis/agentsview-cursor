@@ -21,7 +21,7 @@
     // rows get it from their parent Prompt's SubSessionRef.usage, already
     // rolled up (own activity plus every descendant's) by the backend.
     cost?: Money;
-    tokens?: { input: number; output: number; cacheWrite: number; cacheRead: number; total: number };
+    tokens?: { input: number; output: number; cacheWrite: number; cacheRead: number; total: number; hasUsageData?: boolean };
   }
 
   export interface PromptTreeNode {
@@ -32,7 +32,7 @@
     messageCount: number;
     subSessions: SubSessionRef[];
     cost: Money;
-    tokens: { input: number; output: number; cacheWrite: number; cacheRead: number; total: number };
+    tokens: { input: number; output: number; cacheWrite: number; cacheRead: number; total: number; hasUsageData?: boolean };
     isContinuationStart?: boolean;
     text?: string;
   }
@@ -87,6 +87,7 @@
             cacheWrite: p.usage.cacheCreationTokens,
             cacheRead: p.usage.cacheReadTokens,
             total: p.usage.totalTokens,
+            hasUsageData: p.usage.hasUsageData,
           },
         }))
       : [],
@@ -110,6 +111,7 @@
             cacheWrite: s.usage.cacheCreationTokens,
             cacheRead: s.usage.cacheReadTokens,
             total: s.usage.totalTokens,
+            hasUsageData: s.usage.hasUsageData,
           },
         }))
       : [],
@@ -120,13 +122,19 @@
   );
 
   const tokens = $derived(node.kind === "session" ? node.tokens : node.tokens);
+  // Some providers (e.g. Cursor) never record per-message token usage at
+  // all, so their totals are unknown rather than genuinely zero — shown as
+  // "x" instead of a misleading "0".
+  function tokenLabel(value: number, hasUsageData: boolean | undefined): string {
+    return hasUsageData === false ? "x" : formatTokenCount(value);
+  }
   const tokenBreakdown = $derived(
     tokens
       ? m.usage_tree_token_breakdown({
-          input: formatTokenCount(tokens.input),
-          output: formatTokenCount(tokens.output),
-          cacheWrite: formatTokenCount(tokens.cacheWrite),
-          cacheRead: formatTokenCount(tokens.cacheRead),
+          input: tokenLabel(tokens.input, tokens.hasUsageData),
+          output: tokenLabel(tokens.output, tokens.hasUsageData),
+          cacheWrite: tokenLabel(tokens.cacheWrite, tokens.hasUsageData),
+          cacheRead: tokenLabel(tokens.cacheRead, tokens.hasUsageData),
         })
       : undefined,
   );
@@ -224,9 +232,9 @@
     <span class="row-metric">{formatTimestamp(node.startedAt)}</span>
   {/if}
   {#if node.kind === "session" && node.tokens}
-    <span class="row-tokens">{formatTokenCount(node.tokens.total)}</span>
+    <span class="row-tokens">{tokenLabel(node.tokens.total, node.tokens.hasUsageData)}</span>
   {:else if node.kind === "prompt"}
-    <span class="row-tokens">{formatTokenCount(node.tokens.total)}</span>
+    <span class="row-tokens">{tokenLabel(node.tokens.total, node.tokens.hasUsageData)}</span>
   {/if}
   {#if node.kind === "session" && node.cost}
     <span class="row-cost">{formatMoney(node.cost)}</span>

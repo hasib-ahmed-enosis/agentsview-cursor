@@ -69,6 +69,10 @@
         cacheWrite: s.cacheCreationTokens,
         cacheRead: s.cacheReadTokens,
         total: s.totalTokens,
+        // The Usage page's ranked top-sessions come from the SQL usage
+        // rollup, not per-message payloads, so "missing hook data" doesn't
+        // apply here the way it does for the explorer's per-message tree.
+        hasUsageData: true,
       },
     })),
   );
